@@ -1,0 +1,9 @@
+{
+  "name": "agent-watch",
+  "version": "0.1.0",
+  "description": "Live pane and status line for the Codex, OpenCode, Antigravity, Hermes and Claude subagents that Claude launches",
+  "author": {
+    "name": "Sergei Garcia"
+  },
+  "types": "./types/index.d.ts"
+}

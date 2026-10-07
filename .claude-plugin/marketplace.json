@@ -1,0 +1,13 @@
+{
+  "name": "agent-watch",
+  "description": "agent-watch: live status for the agent CLIs and subagents Claude launches",
+  "owner": {
+    "name": "Sergei Garcia"
+  },
+  "plugins": [
+    {
+      "name": "agent-watch",
+      "source": "./"
+    }
+  ]
+}

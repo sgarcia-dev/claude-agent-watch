@@ -1,0 +1,8 @@
+# Your global gitignore may hide .claude*; this repo needs its manifest.
+!.claude-plugin/
+!.claude-plugin/*.json
+# Claude Code writes the API types here on every load.
+.claude-plugin/types/
+__pycache__/
+*.pyc
+.DS_Store
