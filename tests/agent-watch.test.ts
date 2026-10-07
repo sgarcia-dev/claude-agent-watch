@@ -99,6 +99,11 @@ describe('format', () => {
     expect(statusLine([sampleRun({ exitedAt: 5, finishedAt: 5 })], 10)).toBeUndefined()
     expect(statusLine([sampleRun({})], 125_000)).toBe('◆ codex 2m05s')
   })
+
+  test('many agents fold into one summary', () => {
+    const many = (['codex', 'codex', 'opencode', 'hermes', 'claude'] as const).map((tool, i) => sampleRun({ id: `r${i}`, tool, label: 'w' }))
+    expect(statusLine(many, 10_000)).toBe('5 running · ◆2 ■1 ●1 ✻1')
+  })
 })
 
 describe('the mod', () => {

@@ -176,10 +176,12 @@ def _read(path, out):
         if out["lastActivity"] is None:
             tools = [b for b in content if isinstance(b, dict)
                      and b.get("type") == "tool_use"]
-            activity = tools[-1].get("name") if tools else next(
-                (t.splitlines()[0] for t in reversed(texts) if t), None)
-            # Tool arguments can contain credentials. Report only its name.
-            out["lastActivity"] = common.one_line(activity)
+            if tools:
+                # tool_summary keeps a short, credential-checked argument.
+                out["lastActivity"] = common.tool_summary(tools[-1].get("name"), tools[-1].get("input"))
+            else:
+                out["lastActivity"] = common.one_line(next(
+                    (t for t in reversed(texts) if common.one_line(t)), None))
             if out["lastActivity"]:
                 out["lastActivityAt"] = _milliseconds(activity_record.get("timestamp"))
         if out["progress"] is not None and out["lastActivity"] is not None:

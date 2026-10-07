@@ -34,6 +34,7 @@ export function stateOf(run: Run): RunState {
   if (run.agentStatus === 'completed') return 'done'
   if (run.agentStatus === 'failed' || run.agentStatus === 'killed') return 'failed'
   if (run.agentStatus === 'waiting') return 'waiting'
+  if (run.agentStatus === 'running' || run.agentStatus === 'pending') return 'running'
   const probed = run.probe?.found ? run.probe.state : null
   if (probed === 'done' || probed === 'failed') return probed
   if (run.exitedAt !== null) return run.exitFailed ? 'failed' : 'done'
@@ -125,12 +126,33 @@ export function statusEntry(run: Run, now: number): string {
   return parts.join(' ')
 }
 
+const TOOL_ORDER: ToolName[] = ['codex', 'opencode', 'agy', 'hermes', 'claude']
+
 export function statusLine(runs: readonly Run[], now: number): string | undefined {
   const active = runs.filter(isActive)
   if (active.length === 0) return undefined
-  const shown = active.slice(0, 4).map(r => statusEntry(r, now))
-  if (active.length > 4) shown.push(`+${active.length - 4}`)
-  return shown.join(' · ')
+  if (active.length <= 3) return active.map(r => statusEntry(r, now)).join(' · ')
+  // Many agents: one compact summary instead of a line that runs off screen.
+  const counts = TOOL_ORDER
+    .map(tool => [tool, active.filter(r => r.tool === tool).length] as const)
+    .filter(([, n]) => n > 0)
+    .map(([tool, n]) => `${TOOL_STYLE[tool].glyph}${n}`)
+  const parts = [`${active.length} running`, counts.join(' ')]
+  const withProgress = active.filter(r => r.probe?.progress)
+  if (withProgress.length > 0) {
+    const done = withProgress.reduce((sum, r) => sum + r.probe!.progress!.done, 0)
+    const total = withProgress.reduce((sum, r) => sum + r.probe!.progress!.total, 0)
+    parts.push(`${done}/${total} steps`)
+  }
+  const lefts = active.map(r => remaining(r, now)).filter((ms): ms is number => ms !== null)
+  if (lefts.length > 0) parts.push(`~${duration(Math.max(...lefts))} left`)
+  const waiting = active.filter(r => stateOf(r) === 'waiting').length
+  if (waiting > 0) parts.push(`${waiting} need input`)
+  return parts.join(' · ')
+}
+
+export function steps(n: number): string {
+  return `${n} step${n === 1 ? '' : 's'}`
 }
 
 // First words of the command that launched a CLI run, for its label.
@@ -154,8 +176,8 @@ export function paneText(runs: readonly Run[], now: number, lastPollAt: number):
     lines.push('')
     lines.push(`${TOOL_STYLE[run.tool].glyph} ${TOOL_STYLE[run.tool].name}  ${run.label}`)
     lines.push(`  ${STATE_STYLE[stateOf(run)].word} ${duration(elapsed(run, now))} · ${m.model}${m.effort ? ' ' + m.effort : ''}${m.isObserved ? '' : ' (requested)'}`)
-    lines.push(`  ctx ${ctx === null ? 'unknown' : percent(ctx)}   progress ${pr ? `${pr.done}/${pr.total}` : run.probe?.steps != null ? `${run.probe.steps} steps` : 'none'}${left !== null ? ` ~${duration(left)} left` : ''}`)
-    if (run.probe?.lastActivity) lines.push(`  now: ${run.probe.lastActivity}`)
+    lines.push(`  ctx ${ctx === null ? 'unknown' : percent(ctx)}   progress ${pr ? `${pr.done}/${pr.total}` : run.probe?.steps != null ? steps(run.probe.steps) : 'none'}${left !== null ? ` ~${duration(left)} left` : ''}`)
+    if (run.probe?.lastActivity) lines.push(`  ${isActive(run) ? 'now' : 'result'}: ${run.probe.lastActivity}`)
     if (run.probe?.error) lines.push(`  reader: ${run.probe.error}`)
     lines.push(`  [session ${run.probe?.sessionId ?? '-'} · exited ${run.exitedAt ? duration(now - run.exitedAt) + ' ago' : 'no'} · finished ${run.finishedAt ? duration(now - run.finishedAt) + ' ago' : 'no'} · bg task ${run.backgroundTaskId ?? '-'}]`)
   }

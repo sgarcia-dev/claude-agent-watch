@@ -110,3 +110,52 @@ def tail_lines(path: str, max_bytes: int = 2_000_000) -> list[str]:
     if size > max_bytes and lines:
         lines = lines[1:]
     return lines
+
+
+SECRET_RE = re.compile(
+    r"(?i)(api[_-]?key|token|secret|passw(or)?d|bearer|authorization|sk-[a-z0-9]{8,}|ghp_[a-z0-9]{8,})")
+PATH_KEYS = ("file_path", "filePath", "path", "absolute_path", "notebook_path")
+COMMAND_KEYS = ("command", "cmd", "script")
+PATTERN_KEYS = ("pattern", "query", "url")
+
+
+def tool_summary(name: str | None, args: object = None) -> str | None:
+    """`tool: short argument` for the activity line.
+
+    Shows a command's first 60 characters, a file's name (not its folder) or
+    a search pattern. Anything that looks like a credential shows the tool
+    name alone.
+    """
+    if not name:
+        return None
+    detail = None
+    if isinstance(args, str):
+        try:
+            import json
+            parsed = json.loads(args)
+            args = parsed if isinstance(parsed, dict) else {"command": args}
+        except ValueError:
+            args = {"command": args}
+    if isinstance(args, dict):
+        for key in COMMAND_KEYS:
+            value = args.get(key)
+            if isinstance(value, list):
+                value = " ".join(str(v) for v in value)
+            if isinstance(value, str) and value.strip():
+                detail = " ".join(value.split())[:60]
+                break
+        if detail is None:
+            for key in PATH_KEYS:
+                value = args.get(key)
+                if isinstance(value, str) and value.strip():
+                    detail = os.path.basename(value.rstrip("/")) or value
+                    break
+        if detail is None:
+            for key in PATTERN_KEYS:
+                value = args.get(key)
+                if isinstance(value, str) and value.strip():
+                    detail = value[:60]
+                    break
+    if detail and not SECRET_RE.search(detail):
+        return one_line(f"{name}: {detail}")
+    return one_line(name)

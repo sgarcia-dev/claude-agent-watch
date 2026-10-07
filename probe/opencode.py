@@ -41,11 +41,12 @@ def _context_window(model):
 
 def _activity(data, created):
     parts = data.get('content') or []
-    # Tool arguments and results can contain credentials. Emit only the name.
+    # common.tool_summary keeps only a short, credential-checked argument.
     for part in reversed(parts):
         if part.get('type') == 'tool' and part.get('name'):
             stamp = part.get('time') or {}
-            return common.one_line(part['name']), next(
+            args = (part.get('state') or {}).get('input') or part.get('input')
+            return common.tool_summary(part['name'], args), next(
                 (stamp[k] for k in ('completed', 'ran', 'created')
                  if _number(stamp.get(k)) is not None), created)
     for part in reversed(parts):
@@ -98,7 +99,9 @@ def probe(run: dict, now_ms: int) -> dict:
                 'succeeded': 'done', 'failed': 'failed', 'interrupted': 'failed'}.get(outcome, 'unknown')
             if out['state'] in ('done', 'failed'):
                 out['endedAt'] = idle
-        elif session['time_suspended'] is None:
+        else:
+            # Headless `opencode run` sessions get time_suspended at start, so
+            # it does not mean paused: not idle is running.
             out['state'] = 'running'
         model = _object(session['model'])
         if model.get('providerID') and model.get('id'):
@@ -119,7 +122,9 @@ def probe(run: dict, now_ms: int) -> dict:
             cached = tokens.get('cache') or {}
             used = _sum_pair(tokens.get('input'), cached.get('read'))
             output = _sum_pair(tokens.get('output'), tokens.get('reasoning'))
-            if index == 0:
+            # The newest message may still be streaming with no usage yet;
+            # the latest one that has usage is the current context.
+            if out['contextUsed'] is None and used is not None:
                 out['contextUsed'] = used
             if tokens:
                 input_known &= used is not None

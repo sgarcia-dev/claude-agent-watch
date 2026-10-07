@@ -29,6 +29,7 @@ import {
   remaining,
   stateOf,
   statusLine,
+  steps,
   tokens,
 } from './format'
 
@@ -372,7 +373,7 @@ export const register: Register = on => {
                 )}
                 {'   progress '}
                 {pr === null ? (
-                  <Text dimColor>{p?.steps != null ? `${p.steps} steps` : 'no PROGRESS line yet'}</Text>
+                  <Text dimColor>{p?.steps != null ? steps(p.steps) : 'no PROGRESS line yet'}</Text>
                 ) : (
                   <Text>
                     <Text color={style.color}>{bar(pr, barWidth)}</Text> {p!.progress!.done}/{p!.progress!.total}
@@ -383,7 +384,7 @@ export const register: Register = on => {
               </Text>
               {p?.lastActivity ? (
                 <Text wrap="truncate-end" dimColor>
-                  {'  now: '}
+                  {isDone ? '  result: ' : '  now: '}
                   {p.lastActivity}
                   {p.lastActivityAt ? ` (${duration(now - p.lastActivityAt)} ago)` : ''}
                 </Text>

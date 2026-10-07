@@ -144,8 +144,9 @@ class OpenCodeTests(unittest.TestCase):
                 self.assertEqual(out['endedAt'], 110000 if state == 'failed' else None)
 
     def test_waiting_and_suspended(self):
+        # Headless runs carry time_suspended from the start: still running.
         self.session(suspended=105000)
-        self.assertEqual(self.probe()['state'], 'unknown')
+        self.assertEqual(self.probe()['state'], 'running')
         for kind in ('question', 'permission'):
             self.db.execute('DELETE FROM session_pending')
             self.db.execute('INSERT INTO session_pending VALUES (?,?,?)', ('main', kind, '{}'))

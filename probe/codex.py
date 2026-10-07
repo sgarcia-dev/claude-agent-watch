@@ -100,10 +100,29 @@ def _message(rec, payload, agent_path):
     return None
 
 
+_CODE_CALL = re.compile(r"tools\.([A-Za-z_]+)\(\{(.*?)\}\)", re.S)
+_CODE_ARG = re.compile(r'\b(cmd|command|path|file_path|pattern)\s*:\s*"((?:[^"\\]|\\.)*)"')
+
+
+def _code_mode(source):
+    """Code-mode calls are JavaScript: tools.exec_command({cmd:"..."})."""
+    calls = [c for c in _CODE_CALL.findall(source) if c[0] != "write_stdin"]
+    if not calls:
+        return None
+    name, body = calls[-1]
+    args = {key: value for key, value in _CODE_ARG.findall(body)}
+    return common.tool_summary(name, args)
+
+
 def _activity(payload):
     name = payload.get("name")
     if not isinstance(name, str):
         return None
+    code = payload.get("input")
+    if isinstance(code, str) and "tools." in code:
+        summary = _code_mode(code)
+        if summary:
+            return summary
     leaf = name.rsplit(".", 1)[-1]
     if leaf not in ("exec", "exec_command", "shell", "shell_command"):
         return common.one_line(name)

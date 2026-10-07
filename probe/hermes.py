@@ -104,16 +104,43 @@ def _fill(out: dict, row: sqlite3.Row, conn, root: Path, store: Path):
     # Bound both row count and content size. Ignore user/tool progress packets.
     columns = {r["name"] for r in conn.execute("PRAGMA table_info(messages)")}
     active = " AND active = 1" if "active" in columns else ""
+    # Codex-backed models keep the assistant's text in codex_message_items,
+    # not content; read both.
+    items = ", substr(codex_message_items, -20000) AS items" if "codex_message_items" in columns else ", NULL AS items"
+    calls = ", tool_calls, timestamp" if "tool_calls" in columns else ", NULL AS tool_calls, timestamp"
     messages = conn.execute(
-        "SELECT substr(content, -20000) AS content FROM messages "
+        "SELECT substr(content, -20000) AS content" + items + calls + " FROM messages "
         "WHERE session_id = ? AND role = 'assistant'" + active +
         " ORDER BY timestamp DESC, id DESC LIMIT 100", (row["id"],)
-    )
+    ).fetchall()
     for message in messages:
-        progress = common.find_progress(message["content"])
+        progress = common.find_progress(message["content"]) or common.find_progress(message["items"])
         if progress is not None:
             out["progress"] = progress
             break
+    # The latest tool call says more than Hermes's own activity text.
+    for message in messages:
+        summary = _tool_call_summary(message["tool_calls"])
+        if summary:
+            out["lastActivity"] = summary
+            out["lastActivityAt"] = _milliseconds(message["timestamp"])
+            break
+
+
+def _tool_call_summary(raw):
+    if not raw:
+        return None
+    try:
+        calls = json.loads(raw)
+    except ValueError:
+        return None
+    if not isinstance(calls, list):
+        return None
+    for call in reversed(calls):
+        function = call.get("function") if isinstance(call, dict) else None
+        if isinstance(function, dict) and function.get("name"):
+            return common.tool_summary(function["name"], function.get("arguments"))
+    return None
 
 
 def probe(run: dict, now_ms: int) -> dict:
