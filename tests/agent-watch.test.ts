@@ -2,10 +2,15 @@ import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { detect, segments, taskEnds } from '../hooks/detect'
 import { isActive, remaining, stateOf, statusLine } from '../hooks/format'
+import { mergeProcesses } from '../hooks/runs'
+import type { BashCall, SeenProcess } from '../hooks/runs'
 import type { Run } from '../types'
 
 const PANE = { plugin: 'agent-watch', component: 'Pane', requestId: 'agent-watch' } as const
-const PANE_PROPS = { title: 'Agents', isFocused: false, bodyColumns: 100 }
+const PANE_PROPS = {
+  title: 'Agents', isFocused: false, bodyColumns: 100, placement: 'dock' as const,
+  scroll: { offset: 0, bodyRows: 40 }, view: {},
+}
 
 describe('detect', () => {
   test('finds a Codex run behind variables and redirects', () => {
@@ -51,6 +56,19 @@ describe('detect', () => {
   test('splits on operators but not inside quotes', () => {
     expect(segments(`a 'b; c' && d "e|f"`)).toEqual([['a', 'b; c'], ['d', 'e|f']])
   })
+
+  test('sees through the perl alarm wrapper the OpenCode and Hermes skills use', () => {
+    const launch = detect(`M=x; perl -e 'alarm shift; exec @ARGV' 2700 opencode run --model "opencode-go/glm-5.3-flash#high" --format json "task"`, '/r')
+    expect(launch?.tool).toBe('opencode')
+    expect(launch?.flagModel).toBe('opencode-go/glm-5.3-flash')
+  })
+
+  test('a heredoc body is data: an apostrophe in it hides nothing, a launch in it starts nothing', () => {
+    const writesScript = `cat > run.sh <<'EOF'\ncodex exec -m gpt-6.1-sol "$1"\nEOF\nchmod +x run.sh`
+    expect(detect(writesScript, '/r')).toBeNull()
+    const thenLaunches = `cat > p.txt <<EOF\nDon't stop until it's done.\nEOF\nagy -p "$(cat p.txt)" --model gemini-3.8-flash-medium`
+    expect(detect(thenLaunches, '/r')?.tool).toBe('agy')
+  })
 })
 
 function sampleRun(fields: Partial<Run>): Run {
@@ -67,6 +85,8 @@ function sampleRun(fields: Partial<Run>): Run {
     backgroundTaskId: null,
     sessionHint: null,
     agentStatus: null,
+    pid: null,
+    returnedAt: null,
     exitedAt: null,
     exitFailed: false,
     finishedAt: null,
@@ -82,7 +102,7 @@ describe('format', () => {
       found: true, sessionId: 's', state: 'running' as const, model: null, effort: null,
       contextUsed: null, contextWindow: null, inputTokens: null, outputTokens: null,
       progress: { done: 1, total: 4 }, steps: null, lastActivity: null, lastActivityAt: null,
-      endedAt: null, children: null, error: null,
+      lastMessage: null, lastMessageAt: null, endedAt: null, children: null, error: null,
     }
     expect(remaining(sampleRun({ probe }), 60_000)).toBe(180_000)
   })
@@ -103,6 +123,44 @@ describe('format', () => {
   test('many agents fold into one summary', () => {
     const many = (['codex', 'codex', 'opencode', 'hermes', 'claude'] as const).map((tool, i) => sampleRun({ id: `r${i}`, tool, label: 'w' }))
     expect(statusLine(many, 10_000)).toBe('5 running · ◆2 ■1 ●1 ✻1')
+  })
+})
+
+describe('process scan', () => {
+  const proc = (pid: number, startedAt: number, words = ['codex', 'exec', '-m', 'gpt-6.1-sol']): SeenProcess =>
+    ({ pid, tool: 'codex', words, startedAt, cwd: '/w' })
+  const call = (fields: Partial<BashCall>): BashCall =>
+    ({ id: 'b1', startedAt: 0, endedAt: 1_000, isBackground: false, description: 'Two Codex workers', taskId: null, ...fields })
+
+  test('a launch hidden in a script becomes a run, labeled by its Bash call', () => {
+    const calls = [call({ endedAt: null, isBackground: true, taskId: 'bt1' })]
+    const merged = mergeProcesses([], [proc(11, 500), proc(12, 600)], calls, new Set(), 2_000)
+    expect(merged.added).toBe(2)
+    expect(merged.runs.map(r => r.label)).toEqual(['Two Codex workers', 'Two Codex workers (2)'])
+    expect(merged.runs[0]?.flagModel).toBe('gpt-6.1-sol')
+    expect(merged.runs[0]?.backgroundTaskId).toBe('bt1')
+  })
+
+  test('a detected launch takes its process, and ends when the process exits', () => {
+    const run = sampleRun({ id: 'toolu_1', startedAt: 1_000, isBackground: false, returnedAt: 1_200 })
+    const seen = new Set<number>()
+    const first = mergeProcesses([run], [proc(21, 1_100)], [], seen, 2_000)
+    expect(first.added).toBe(0)
+    expect(first.runs[0]?.pid).toBe(21)
+    expect(first.runs[0]?.exitedAt).toBeNull()
+    const later = mergeProcesses(first.runs, [], [], seen, 9_000)
+    expect(later.runs[0]?.exitedAt).toBe(9_000)
+    expect(isActive(later.runs[0]!)).toBe(false)
+  })
+
+  test('a foreground run with no process ended when its call returned', () => {
+    const run = sampleRun({ startedAt: 1_000, isBackground: false, returnedAt: 1_500 })
+    expect(mergeProcesses([run], [], [], new Set(), 3_000).runs[0]?.exitedAt).toBe(1_500)
+    expect(mergeProcesses([run], null, [], new Set(), 3_000).runs[0]?.exitedAt).toBe(1_500)
+  })
+
+  test('a process already shown never comes back as a new run', () => {
+    expect(mergeProcesses([], [proc(31, 500)], [], new Set([31]), 2_000).added).toBe(0)
   })
 })
 
@@ -128,12 +186,15 @@ describe('the mod', () => {
       return { value: {
         exitCode: 0,
         stderr: '',
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
         stdout: JSON.stringify({
+          processes: [],
           runs: request.runs.map(r => ({
             id: r.id, found: true, sessionId: 'thread-1', state: 'running', model: 'gpt-6.1-sol', effort: 'medium',
             contextUsed: 64_000, contextWindow: 256_000, inputTokens: 100_000, outputTokens: 2_000,
             progress: { done: 2, total: 5 }, steps: 9, lastActivity: 'exec: npm test', lastActivityAt: 1_000_000,
-            endedAt: null, children: 0, error: null,
+            lastMessage: 'Running the tests before I edit the reader.', lastMessageAt: 1_000_000, endedAt: null, children: 0, error: null,
           })),
         }),
       } }
@@ -155,15 +216,16 @@ describe('the mod', () => {
       await ui.unmount()
     }
 
-    await clock.advance(4_000)
+    await clock.advance(6_000)
 
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ ...PANE, surface, props: PANE_PROPS })
       expect(await ui.find({ text: /25%/ })).toBeDefined()
       expect(await ui.find({ text: /2\/5/ })).toBeDefined()
       expect(await ui.find({ text: /exec: npm test/ })).toBeDefined()
+      expect(await ui.find({ text: /Running the tests before I edit the reader/ })).toBeDefined()
       await ui.unmount()
     }
-    expect(statuses.at(-1)).toBe('◆ codex 3s 2/5 ctx 25%')
+    expect(statuses.at(-1)).toBe('◆ codex 5s 2/5 ctx 25%')
   })
 })

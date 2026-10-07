@@ -9,3 +9,4 @@ __pycache__/
 !docs/readers/claude.md
 # Plain-text copy of the pane, rewritten each poll.
 .pane.txt
+.pane/

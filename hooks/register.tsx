@@ -4,14 +4,19 @@
 // OpenCode, Antigravity (agy) or Hermes, and Agent calls that start Claude
 // subagents. Each becomes a Run in $.state. Every 5 seconds the mod runs
 // probe/agent_probe.py, which reads each tool's own session files and
-// reports model, context use, PROGRESS lines and last activity. A pane and a
-// status line entry show the runs; both go away once nothing is running.
+// reports model, context use, PROGRESS lines and last activity. The probe
+// also lists the agent CLI processes this session started, which catches
+// launches inside scripts and loops, and tells when each process exits. A
+// pane and a status line entry show the runs; both go away once nothing is
+// running.
 
 import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { Probed, Run } from '../types'
 import { agentIdFrom, backgroundTaskId, detect, taskEnds } from './detect'
+import { mergeProcesses, newRun, patched, scanWindows, trimCalls, wantsScan, withRun } from './runs'
+import type { BashCall, SeenProcess } from './runs'
 import {
   STATE_STYLE,
   TOOL_STYLE,
@@ -40,7 +45,6 @@ const POLL_MS = 5_000
 const LINGER_MS = 5 * 60_000
 // A run the probe never links and no tool call ends is dropped after this.
 const STALE_MS = 6 * 60 * 60_000
-const MAX_RUNS = 30
 
 const runsAtom = atom({ plugin: 'agent-watch', key: 'runs' } as const, [] as Run[])
 const lastPollAtom = atom({ plugin: 'agent-watch', key: 'lastPollAt' } as const, 0)
@@ -50,37 +54,14 @@ const lastPollAtom = atom({ plugin: 'agent-watch', key: 'lastPollAt' } as const,
 // for an early check without holding `$` themselves.
 let pollSoon: ((ms: number) => void) | null = null
 let isPolling = false
+// This session's recent Bash calls, and agent pids already shown.
+let bashCalls: BashCall[] = []
+const seenPids = new Set<number>()
 
-function newRun(fields: Partial<Run> & Pick<Run, 'id' | 'tool' | 'label' | 'command' | 'startedAt'>): Run {
-  return {
-    cwd: null,
-    flagModel: null,
-    flagEffort: null,
-    isBackground: false,
-    backgroundTaskId: null,
-    sessionHint: null,
-    agentStatus: null,
-    exitedAt: null,
-    exitFailed: false,
-    finishedAt: null,
-    probe: null,
-    probedAt: null,
-    ...fields,
-  }
-}
-
-function withRun(runs: Run[] | undefined, run: Run): Run[] {
-  return [...(runs ?? []).filter(r => r.id !== run.id), run].slice(-MAX_RUNS)
-}
-
-function patched(runs: Run[] | undefined, id: string, patch: Partial<Run>): Run[] {
-  return (runs ?? []).map(r => (r.id === id ? { ...r, ...patch } : r))
-}
-
-type ProbeAnswer = { runs: (Probed & { id: string })[] }
+type ProbeAnswer = { runs: (Probed & { id: string })[]; processes?: SeenProcess[] | null; scanError?: string }
 
 // `all` includes finished runs, so their sessions stay claimed.
-function probeRequest(runs: Run[], all: Run[], now: number): string {
+function probeRequest(runs: Run[], all: Run[], now: number, isScan: boolean): string {
   const claimed = (tool: string, id: string) =>
     all
       .filter(r => r.tool === tool && r.id !== id && r.probe?.sessionId)
@@ -97,14 +78,17 @@ function probeRequest(runs: Run[], all: Run[], now: number): string {
       sessionId: r.probe?.sessionId ?? r.sessionHint,
       claimed: claimed(r.tool, r.id),
     })),
+    scan: isScan
+      ? { windows: scanWindows(bashCalls), known: all.map(r => r.pid).filter((p): p is number => p !== null) }
+      : undefined,
   })
 }
 
-function parseProbe(stdout: string): Map<string, Probed> {
+function parseProbe(stdout: string): { answers: Map<string, Probed>; processes: SeenProcess[] | null; scanError: string | null } {
   const answers = new Map<string, Probed>()
   const parsed = JSON.parse(stdout) as ProbeAnswer
   for (const answer of parsed.runs) answers.set(answer.id, answer)
-  return answers
+  return { answers, processes: parsed.processes ?? null, scanError: parsed.scanError ?? null }
 }
 
 // Folds one probe pass into the runs; returns the new list and the runs
@@ -159,18 +143,25 @@ export const register: Register = on => {
       try {
         const now = await $.clock.now()
         const before = (await read($, runsAtom)) ?? []
+        bashCalls = trimCalls(bashCalls, now)
+        const isScan = before.some(isActive) || wantsScan(bashCalls, now)
         // Idle: no process, no state writes, no redraws.
-        if (before.length === 0) return
+        if (before.length === 0 && !isScan) return
         const toProbe = before.filter(r => (isActive(r) || !r.probe?.found) && now - r.startedAt < STALE_MS)
         let answers = new Map<string, Probed>()
-        if (toProbe.length > 0) {
+        let processes: SeenProcess[] | null = null
+        if (toProbe.length > 0 || isScan) {
           try {
             const result = await $.process.run(['python3', '-I', `${$.plugin.root}/probe/agent_probe.py`], {
-              stdin: probeRequest(toProbe, before, now),
+              stdin: probeRequest(toProbe, before, now, isScan),
               timeoutMs: 20_000,
             })
-            if (result.exitCode === 0) answers = parseProbe(result.stdout)
-            else $.ui.log(`agent-watch: probe exited ${result.exitCode}: ${result.stderr.slice(0, 300)}`, { to: 'debug' })
+            if (result.exitCode === 0) {
+              const parsed = parseProbe(result.stdout)
+              answers = parsed.answers
+              processes = parsed.processes
+              if (parsed.scanError) $.ui.log(`agent-watch: process scan failed: ${parsed.scanError}`, { to: 'debug' })
+            } else $.ui.log(`agent-watch: probe exited ${result.exitCode}: ${result.stderr.slice(0, 300)}`, { to: 'debug' })
           } catch (err) {
             $.ui.log(`agent-watch: probe failed: ${String(err).slice(0, 300)}`, { to: 'debug' })
           }
@@ -179,18 +170,29 @@ export const register: Register = on => {
         const agentStatus = new Map(agents.map(a => [a.id, a.status as string]))
 
         let finished: Run[] = []
+        let added = 0
         await update($, runsAtom, runs => {
-          const applied = applyProbe(runs, answers, agentStatus, now)
+          const merged = mergeProcesses(runs ?? [], processes, bashCalls, seenPids, now)
+          added = merged.added
+          const applied = applyProbe(merged.runs, answers, agentStatus, now)
           finished = applied.finished
           return applied.runs
         })
+        if (added > 0) {
+          // Found by the process scan: show it, and read its session soon.
+          void $.ui.open({ id: PANE, title: 'Agents' })
+          pollSoon?.(1_000)
+        }
         await update($, lastPollAtom, () => now)
         for (const run of finished) $.ui.toast(finishToast(run, now))
 
         const after = (await read($, runsAtom)) ?? []
         $.ui.status(statusLine(after, now))
-        await $.fs.write(`${$.plugin.root}/.pane.txt`, paneText(after, now, now)).catch(() => undefined)
+        // One copy per session, so sessions do not overwrite each other.
+        const sessionId = await $.session.id().catch(() => 'session')
+        await $.fs.write(`${$.plugin.root}/.pane/${sessionId}.txt`, paneText(after, now, now)).catch(() => undefined)
         if (after.length === 0 && before.length > 0) await $.ui.close({ id: PANE }).catch(() => undefined)
+        for (const run of after) if (run.pid !== null) seenPids.add(run.pid)
       } finally {
         isPolling = false
       }
@@ -222,72 +224,124 @@ export const register: Register = on => {
     return { text: `agent-watch: ${active} running, ${runs.length - active} recently finished.` }
   })
 
+  // Every Bash call is noted for the process scan's time windows. A call
+  // whose command plainly starts an agent CLI also becomes a run at once.
+  // Errors in this mod are logged and never stop the call; the engine's
+  // .catch replays a call that already ran rather than running it again.
   on('tool.call', { tool: 'Bash' }, async ($, e, next) => {
-    const launch = detect(e.command, await $.session.cwd())
-    if (!launch) return next(e)
-    const startedAt = await $.clock.now()
-    const id = e.tool_use_id ?? `bash-${startedAt}`
-    const run = newRun({
-      id,
-      tool: launch.tool,
-      label: e.description || labelFor(e.command, launch.tool),
-      command: e.command.slice(0, 2000),
-      cwd: launch.cwd,
-      startedAt,
-      flagModel: launch.flagModel,
-      flagEffort: launch.flagEffort,
-      isBackground: e.run_in_background === true,
-    })
-    await update($, runsAtom, runs => withRun(runs, run))
-    void $.ui.open({ id: PANE, title: 'Agents' })
-    $.ui.status(statusLine((await read($, runsAtom)) ?? [], startedAt))
-    pollSoon?.(3_000)
-
-    const ran = await next(e)
-    if (e.run_in_background === true) {
-      await update($, runsAtom, runs => patched(runs, id, { backgroundTaskId: backgroundTaskId(ran.text) }))
-    } else {
-      const exitedAt = await $.clock.now()
-      const exitFailed = ran.deny !== undefined || ran.isError === true
-      await update($, runsAtom, runs => patched(runs, id, { exitedAt, exitFailed }))
-      pollSoon?.(1_000)
+    let runId: string | null = null
+    let callId = ''
+    try {
+      const startedAt = await $.clock.now()
+      callId = e.tool_use_id ?? `bash-${startedAt}`
+      const isBackground = e.run_in_background === true
+      bashCalls = [...bashCalls, { id: callId, startedAt, endedAt: null, isBackground, description: e.description ?? '', taskId: null }]
+      const launch = detect(e.command, await $.session.cwd())
+      if (launch) {
+        runId = callId
+        const run = newRun({
+          id: runId,
+          tool: launch.tool,
+          label: e.description || labelFor(e.command, launch.tool),
+          command: e.command.slice(0, 2000),
+          cwd: launch.cwd,
+          startedAt,
+          flagModel: launch.flagModel,
+          flagEffort: launch.flagEffort,
+          isBackground,
+        })
+        await update($, runsAtom, runs => withRun(runs, run))
+        void $.ui.open({ id: PANE, title: 'Agents' })
+        $.ui.status(statusLine((await read($, runsAtom)) ?? [], startedAt))
+      }
+      pollSoon?.(3_000)
+    } catch (err) {
+      $.ui.log(`agent-watch: Bash launch check failed: ${String(err).slice(0, 300)}`, { to: 'debug' })
     }
+
+    // A foreground run ends when its call returns, unless its process lives
+    // on (`cmd &`); the next poll's process scan decides.
+    const settle = async (isFailed: boolean, text: string | undefined): Promise<void> => {
+      try {
+        const now = await $.clock.now()
+        const call = bashCalls.find(c => c.id === callId)
+        if (call?.isBackground) call.taskId = backgroundTaskId(text)
+        else if (call) call.endedAt = now
+        if (runId !== null) {
+          const id = runId
+          const patch = call?.isBackground
+            ? { backgroundTaskId: call.taskId }
+            : { returnedAt: now, exitFailed: isFailed }
+          await update($, runsAtom, runs => patched(runs, id, patch))
+        }
+        pollSoon?.(1_500)
+      } catch (err) {
+        $.ui.log(`agent-watch: Bash result check failed: ${String(err).slice(0, 300)}`, { to: 'debug' })
+      }
+    }
+    let ran
+    try {
+      ran = await next(e)
+    } catch (err) {
+      await settle(true, undefined)
+      throw err
+    }
+    await settle(ran.deny !== undefined || ran.isError === true, ran.text)
     return ran
   }).catch(($, e, next) => next(e))
 
   on('tool.call', { tool: 'Agent' }, async ($, e, next) => {
-    const startedAt = await $.clock.now()
-    const id = e.tool_use_id ?? `agent-${startedAt}`
-    const type = e.subagent_type ?? 'general-purpose'
-    const run = newRun({
-      id,
-      tool: 'claude',
-      label: e.description || type,
-      command: type,
-      cwd: await $.session.cwd(),
-      startedAt,
-      flagModel: e.model ?? null,
-      flagEffort: e.effort ?? null,
-    })
-    await update($, runsAtom, runs => withRun(runs, run))
-    void $.ui.open({ id: PANE, title: 'Agents' })
-    $.ui.status(statusLine((await read($, runsAtom)) ?? [], startedAt))
-    pollSoon?.(3_000)
+    let runId: string | null = null
+    try {
+      const startedAt = await $.clock.now()
+      runId = e.tool_use_id ?? `agent-${startedAt}`
+      const type = e.subagent_type ?? 'general-purpose'
+      const run = newRun({
+        id: runId,
+        tool: 'claude',
+        label: e.description || type,
+        command: type,
+        cwd: await $.session.cwd(),
+        startedAt,
+        flagModel: e.model ?? null,
+        flagEffort: e.effort ?? null,
+      })
+      await update($, runsAtom, runs => withRun(runs, run))
+      void $.ui.open({ id: PANE, title: 'Agents' })
+      $.ui.status(statusLine((await read($, runsAtom)) ?? [], startedAt))
+      pollSoon?.(3_000)
+    } catch (err) {
+      runId = null
+      $.ui.log(`agent-watch: Agent launch check failed: ${String(err).slice(0, 300)}`, { to: 'debug' })
+    }
 
-    const ran = await next(e)
+    const settle = async (patch: (now: number) => Partial<Run>): Promise<void> => {
+      if (runId === null) return
+      const id = runId
+      try {
+        const now = await $.clock.now()
+        await update($, runsAtom, runs => patched(runs, id, patch(now)))
+        pollSoon?.(1_000)
+      } catch (err) {
+        $.ui.log(`agent-watch: Agent result check failed: ${String(err).slice(0, 300)}`, { to: 'debug' })
+      }
+    }
+    let ran
+    try {
+      ran = await next(e)
+    } catch (err) {
+      await settle(now => ({ exitedAt: now, exitFailed: true }))
+      throw err
+    }
     // The result says whether the subagent already finished or runs on in
     // the background ("async_launched"); either way it names the agentId.
     const result = (ran.result ?? {}) as { status?: string; agentId?: string }
     const sessionHint = result.agentId ?? agentIdFrom(ran.text)
     const isFinished = ran.deny !== undefined || ran.isError === true || result.status === 'completed'
-    if (isFinished) {
-      const exitedAt = await $.clock.now()
-      const exitFailed = result.status !== 'completed'
-      await update($, runsAtom, runs => patched(runs, id, { sessionHint, exitedAt, exitFailed }))
-      pollSoon?.(1_000)
-    } else {
-      await update($, runsAtom, runs => patched(runs, id, { sessionHint, isBackground: true }))
-    }
+    await settle(now =>
+      isFinished
+        ? { sessionHint, exitedAt: now, exitFailed: result.status !== 'completed' }
+        : { sessionHint, isBackground: true })
     return ran
   }).catch(($, e, next) => next(e))
 
@@ -295,16 +349,21 @@ export const register: Register = on => {
   // tool's own files say yet.
   on('session.append', async ($, e, next) => {
     const stored = await next(e)
-    const ends = taskEnds(e.message.content)
-    if (ends.length === 0) return stored
-    const runs = (await read($, runsAtom)) ?? []
-    const now = await $.clock.now()
-    for (const end of ends) {
-      const run = runs.find(r => r.backgroundTaskId === end.taskId && r.exitedAt === null)
-      if (!run) continue
-      const exitFailed = end.status !== 'completed'
-      await update($, runsAtom, list => patched(list, run.id, { exitedAt: now, exitFailed }))
-      pollSoon?.(1_000)
+    try {
+      const ends = taskEnds(e.message.content)
+      if (ends.length === 0) return stored
+      const runs = (await read($, runsAtom)) ?? []
+      const now = await $.clock.now()
+      for (const end of ends) {
+        for (const call of bashCalls) if (call.taskId === end.taskId) call.endedAt = now
+        const run = runs.find(r => r.backgroundTaskId === end.taskId && r.exitedAt === null)
+        if (!run) continue
+        const exitFailed = end.status !== 'completed'
+        await update($, runsAtom, list => patched(list, run.id, { exitedAt: now, exitFailed }))
+        pollSoon?.(1_000)
+      }
+    } catch (err) {
+      $.ui.log(`agent-watch: task notice check failed: ${String(err).slice(0, 300)}`, { to: 'debug' })
     }
     return stored
   }).catch(($, e, next) => next(e))
@@ -383,10 +442,16 @@ export const register: Register = on => {
                 {p?.children ? <Text dimColor> · {p.children} children</Text> : null}
               </Text>
               {p?.lastActivity ? (
-                <Text wrap="truncate-end" dimColor>
-                  {isDone ? '  result: ' : '  now: '}
+                <Text wrap="truncate-end">
+                  <Text dimColor>{isDone ? '  last: ' : '  now: '}</Text>
                   {p.lastActivity}
-                  {p.lastActivityAt ? ` (${duration(now - p.lastActivityAt)} ago)` : ''}
+                  <Text dimColor>{p.lastActivityAt ? ` · ${duration(now - p.lastActivityAt)} ago` : ''}</Text>
+                </Text>
+              ) : null}
+              {p?.lastMessage ? (
+                <Text wrap="truncate-end">
+                  <Text dimColor>{isDone ? '  result: ' : '  said: '}</Text>
+                  <Text italic>{p.lastMessage}</Text>
                 </Text>
               ) : null}
               {p?.error ? (

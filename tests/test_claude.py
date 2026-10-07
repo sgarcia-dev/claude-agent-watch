@@ -107,7 +107,7 @@ class ClaudeTests(unittest.TestCase):
         self.assertEqual(out["progress"], {"done": 2, "total": 7})
         self.assertEqual(out["contextWindow"], 200000)
         self.assertEqual(out["effort"], "high")
-        self.assertEqual(out["lastActivity"], "Bash")
+        self.assertEqual(out["lastActivity"], "Bash: echo synthetic-secret")
         self.assertEqual(out["lastActivityAt"], START + 1000)
         self.assertIsNone(out["endedAt"])
         self.assertIsNone(out["children"])
@@ -117,7 +117,7 @@ class ClaudeTests(unittest.TestCase):
         out = self.probe()
         self.assertEqual(out["state"], "done")
         self.assertEqual(out["endedAt"], START + 1000)
-        self.assertEqual(out["lastActivity"], "Finished")
+        self.assertEqual(out["lastMessage"], "Finished")
         self.assertEqual(out["progress"], {"done": 7, "total": 7})
 
     def test_later_tool_use_resumes(self):

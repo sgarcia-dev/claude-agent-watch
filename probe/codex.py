@@ -15,10 +15,6 @@ except ImportError:
 
 TAIL_BYTES = 2_000_000
 HEAD_BYTES = 262_144
-_SENSITIVE = re.compile(
-    r"(?i)(token|password|passwd|secret|api[_-]?key|authorization|bearer|"
-    r"\bsk-[a-z0-9]|\b[A-Z_]*(?:KEY|TOKEN|PASSWORD)=)"
-)
 
 
 def _ms(value):
@@ -136,8 +132,8 @@ def _activity(payload):
         command = args.get("cmd", args.get("command"))
         if isinstance(command, list) and all(isinstance(c, str) for c in command):
             command = " ".join(command)
-        if isinstance(command, str) and not _SENSITIVE.search(command):
-            return common.one_line(f"{name}: {command[:60]}")
+        if isinstance(command, str):
+            return common.tool_summary(name, {"command": command})
     return common.one_line(name)
 
 
@@ -200,9 +196,10 @@ def _read(path, meta, out):
             progress = common.find_progress(text)
             if progress is not None:
                 out["progress"] = progress
-            first = text.strip().splitlines()[0]
-            out["lastActivity"] = common.one_line(first) if not _SENSITIVE.search(first) else "agent message"
-            out["lastActivityAt"] = stamp
+            message = common.message_line(text)
+            if message:
+                out["lastMessage"] = message
+                out["lastMessageAt"] = stamp
     out["steps"] = calls if complete_tail else None
 
 

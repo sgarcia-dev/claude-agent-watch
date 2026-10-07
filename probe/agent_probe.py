@@ -57,7 +57,17 @@ def main() -> int:
         if out.get("found") and out.get("sessionId"):
             mine.add(out["sessionId"])
         answers[i] = out
-    json.dump({"runs": answers}, sys.stdout)
+    reply = {"runs": answers}
+    scan = request.get("scan")
+    if isinstance(scan, dict):
+        # The process table: which agent CLIs this session has running now.
+        try:
+            import processes
+            reply["processes"] = processes.scan(scan.get("windows"), scan.get("known"))
+        except Exception as exc:
+            reply["processes"] = None
+            reply["scanError"] = common.one_line(f"{type(exc).__name__}: {exc}")
+    json.dump(reply, sys.stdout)
     return 0
 
 

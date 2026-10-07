@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 from pathlib import Path
 import sqlite3
 import time
@@ -118,6 +119,13 @@ def _fill(out: dict, row: sqlite3.Row, conn, root: Path, store: Path):
         if progress is not None:
             out["progress"] = progress
             break
+    for message in messages:
+        text = message["content"] or _items_text(message["items"])
+        line = common.message_line(text)
+        if line:
+            out["lastMessage"] = line
+            out["lastMessageAt"] = _milliseconds(message["timestamp"])
+            break
     # The latest tool call says more than Hermes's own activity text.
     for message in messages:
         summary = _tool_call_summary(message["tool_calls"])
@@ -125,6 +133,24 @@ def _fill(out: dict, row: sqlite3.Row, conn, root: Path, store: Path):
             out["lastActivity"] = summary
             out["lastActivityAt"] = _milliseconds(message["timestamp"])
             break
+
+
+_ITEM_TEXT = re.compile(r'"text"\s*:\s*("(?:[^"\\]|\\.)*")')
+
+
+def _items_text(raw):
+    """Last text in codex_message_items, which may be cut mid-JSON."""
+    if not raw:
+        return None
+    found = _ITEM_TEXT.findall(raw)
+    for quoted in reversed(found):
+        try:
+            text = json.loads(quoted)
+        except ValueError:
+            continue
+        if isinstance(text, str) and text.strip():
+            return text
+    return None
 
 
 def _tool_call_summary(raw):

@@ -176,6 +176,10 @@ def _read(conn, path: Path, out: dict, now_ms: int) -> None:
             continue
         response = _at(row["step_payload"], 20)
         text = _text(_at(response, 8)) or _text(_at(response, 1))
+        if out["lastMessage"] is None:
+            out["lastMessage"] = common.message_line(text)
+            if out["lastMessage"]:
+                out["lastMessageAt"] = _activity_time(row["metadata"])
         progress = common.find_progress(text)
         if progress is not None:
             out["progress"] = progress

@@ -15,8 +15,11 @@ LINK_END_SLACK_MS = 2_000
 FIELDS = (
     "found", "sessionId", "state", "model", "effort", "contextUsed",
     "contextWindow", "inputTokens", "outputTokens", "progress", "steps",
-    "lastActivity", "lastActivityAt", "endedAt", "children", "error",
+    "lastActivity", "lastActivityAt", "lastMessage", "lastMessageAt",
+    "endedAt", "children", "error",
 )
+# The pane cuts lines to its width; this only caps what crosses the pipe.
+LINE_LIMIT = 300
 
 
 def empty_result(run: dict) -> dict:
@@ -112,19 +115,35 @@ def tail_lines(path: str, max_bytes: int = 2_000_000) -> list[str]:
     return lines
 
 
+# Values that look like credentials. They are replaced, not the whole line,
+# so a command that mentions a key still shows what it does.
 SECRET_RE = re.compile(
-    r"(?i)(api[_-]?key|token|secret|passw(or)?d|bearer|authorization|sk-[a-z0-9]{8,}|ghp_[a-z0-9]{8,})")
+    r"(?i)(sk-[a-z0-9_-]{12,}|gh[pousr]_[a-z0-9]{20,}|github_pat_[a-z0-9_]{20,}"
+    r"|xox[abprs]-[a-z0-9-]{10,}|AKIA[0-9A-Z]{16}|bearer\s+[a-z0-9._~+/=-]{12,}"
+    r"|(?:api[_-]?key|token|secret|passw(?:or)?d|authorization)[\"']?\s*[:=]\s*[\"']?(?:bearer\s+)?[^\s\"',;]{6,}"
+    r"|--?(?:api[_-]?key|token|secret|passw(?:or)?d|auth)[\s=]+[^\s\"',;]{4,}"
+    r"|[a-z0-9+_=-]{40,})")
 PATH_KEYS = ("file_path", "filePath", "path", "absolute_path", "notebook_path")
 COMMAND_KEYS = ("command", "cmd", "script")
 PATTERN_KEYS = ("pattern", "query", "url")
 
 
-def tool_summary(name: str | None, args: object = None) -> str | None:
-    """`tool: short argument` for the activity line.
+def redact(text: str) -> str:
+    return SECRET_RE.sub("[hidden]", text)
 
-    Shows a command's first 60 characters, a file's name (not its folder) or
-    a search pattern. Anything that looks like a credential shows the tool
-    name alone.
+
+def message_line(text: str | None) -> str | None:
+    """An agent's own words on one line, credentials hidden."""
+    if not text:
+        return None
+    return one_line(redact(str(text)), LINE_LIMIT)
+
+
+def tool_summary(name: str | None, args: object = None) -> str | None:
+    """`tool: argument` for the activity line.
+
+    Shows the whole command, a file's name (not its folder) or a search
+    pattern, on one line. Credential-looking values read [hidden].
     """
     if not name:
         return None
@@ -142,7 +161,7 @@ def tool_summary(name: str | None, args: object = None) -> str | None:
             if isinstance(value, list):
                 value = " ".join(str(v) for v in value)
             if isinstance(value, str) and value.strip():
-                detail = " ".join(value.split())[:60]
+                detail = value
                 break
         if detail is None:
             for key in PATH_KEYS:
@@ -154,8 +173,8 @@ def tool_summary(name: str | None, args: object = None) -> str | None:
             for key in PATTERN_KEYS:
                 value = args.get(key)
                 if isinstance(value, str) and value.strip():
-                    detail = value[:60]
+                    detail = value
                     break
-    if detail and not SECRET_RE.search(detail):
-        return one_line(f"{name}: {detail}")
+    if detail:
+        return one_line(redact(f"{name}: {detail}"), LINE_LIMIT)
     return one_line(name)

@@ -177,14 +177,13 @@ def _read(path, out):
             tools = [b for b in content if isinstance(b, dict)
                      and b.get("type") == "tool_use"]
             if tools:
-                # tool_summary keeps a short, credential-checked argument.
                 out["lastActivity"] = common.tool_summary(tools[-1].get("name"), tools[-1].get("input"))
-            else:
-                out["lastActivity"] = common.one_line(next(
-                    (t for t in reversed(texts) if common.one_line(t)), None))
-            if out["lastActivity"]:
                 out["lastActivityAt"] = _milliseconds(activity_record.get("timestamp"))
-        if out["progress"] is not None and out["lastActivity"] is not None:
+        if out["lastMessage"] is None:
+            out["lastMessage"] = common.message_line(text)
+            if out["lastMessage"]:
+                out["lastMessageAt"] = _milliseconds(activity_record.get("timestamp"))
+        if None not in (out["progress"], out["lastActivity"], out["lastMessage"]):
             break
 
 

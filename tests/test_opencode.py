@@ -110,7 +110,7 @@ class OpenCodeTests(unittest.TestCase):
         self.assertEqual(out['outputTokens'], 17)
         self.assertEqual(out['progress'], dict(done=2, total=4))
         self.assertEqual(out['steps'], 2)
-        self.assertEqual(out['lastActivity'], 'shell')
+        self.assertEqual(out['lastActivity'], 'shell: secret fixture argument')
         self.assertEqual(out['lastActivityAt'], 100010)
         self.assertEqual(out['children'], 1)
         self.assertEqual(out['model'], 'fixture/test-model')
@@ -131,7 +131,7 @@ class OpenCodeTests(unittest.TestCase):
         self.assertEqual(out['inputTokens'], 150)
         self.assertEqual(out['outputTokens'], 25)
         self.assertEqual(out['contextUsed'], 5)
-        self.assertEqual(out['lastActivity'], 'Finished')
+        self.assertEqual(out['lastMessage'], 'Finished')
         self.assertEqual(out['progress'], dict(done=2, total=2))
 
     def test_failed_aborted_and_unknown_outcomes(self):

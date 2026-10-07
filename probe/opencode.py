@@ -39,22 +39,22 @@ def _context_window(model):
         return None
 
 
+def _message(data, created):
+    text = '\n'.join(p.get('text', '') for p in data.get('content') or [] if p.get('type') == 'text' and p.get('text'))
+    stamp = data.get('time') or {}
+    return common.message_line(text), next(
+        (stamp[k] for k in ('completed', 'streamed', 'created') if _number(stamp.get(k)) is not None), created)
+
+
 def _activity(data, created):
     parts = data.get('content') or []
-    # common.tool_summary keeps only a short, credential-checked argument.
+    # common.tool_summary hides credential-looking values.
     for part in reversed(parts):
         if part.get('type') == 'tool' and part.get('name'):
             stamp = part.get('time') or {}
             args = (part.get('state') or {}).get('input') or part.get('input')
             return common.tool_summary(part['name'], args), next(
                 (stamp[k] for k in ('completed', 'ran', 'created')
-                 if _number(stamp.get(k)) is not None), created)
-    for part in reversed(parts):
-        if part.get('type') == 'text' and part.get('text'):
-            text = part['text'].splitlines()[0]
-            stamp = data.get('time') or {}
-            return common.one_line(text), next(
-                (stamp[k] for k in ('completed', 'streamed', 'created')
                  if _number(stamp.get(k)) is not None), created)
     return None, None
 
@@ -136,6 +136,10 @@ def probe(run: dict, now_ms: int) -> dict:
                 input_known = output_known = False
             if out['lastActivity'] is None:
                 out['lastActivity'], out['lastActivityAt'] = _activity(data, row['time_created'])
+            if out['lastMessage'] is None:
+                message, at = _message(data, row['time_created'])
+                if message:
+                    out['lastMessage'], out['lastMessageAt'] = message, at
             if out['progress'] is None:
                 text = '\n'.join(p.get('text', '') for p in data.get('content', []) if p.get('type') == 'text')
                 out['progress'] = common.find_progress(text)

@@ -177,9 +177,10 @@ export function paneText(runs: readonly Run[], now: number, lastPollAt: number):
     lines.push(`${TOOL_STYLE[run.tool].glyph} ${TOOL_STYLE[run.tool].name}  ${run.label}`)
     lines.push(`  ${STATE_STYLE[stateOf(run)].word} ${duration(elapsed(run, now))} · ${m.model}${m.effort ? ' ' + m.effort : ''}${m.isObserved ? '' : ' (requested)'}`)
     lines.push(`  ctx ${ctx === null ? 'unknown' : percent(ctx)}   progress ${pr ? `${pr.done}/${pr.total}` : run.probe?.steps != null ? steps(run.probe.steps) : 'none'}${left !== null ? ` ~${duration(left)} left` : ''}`)
-    if (run.probe?.lastActivity) lines.push(`  ${isActive(run) ? 'now' : 'result'}: ${run.probe.lastActivity}`)
+    if (run.probe?.lastActivity) lines.push(`  ${isActive(run) ? 'now' : 'last'}: ${run.probe.lastActivity}`)
+    if (run.probe?.lastMessage) lines.push(`  ${isActive(run) ? 'said' : 'result'}: ${run.probe.lastMessage}`)
     if (run.probe?.error) lines.push(`  reader: ${run.probe.error}`)
-    lines.push(`  [session ${run.probe?.sessionId ?? '-'} · exited ${run.exitedAt ? duration(now - run.exitedAt) + ' ago' : 'no'} · finished ${run.finishedAt ? duration(now - run.finishedAt) + ' ago' : 'no'} · bg task ${run.backgroundTaskId ?? '-'}]`)
+    lines.push(`  [session ${run.probe?.sessionId ?? '-'} · exited ${run.exitedAt ? duration(now - run.exitedAt) + ' ago' : 'no'} · finished ${run.finishedAt ? duration(now - run.finishedAt) + ' ago' : 'no'} · bg task ${run.backgroundTaskId ?? '-'} · pid ${run.pid ?? '-'}]`)
   }
   return lines.join('\n') + '\n'
 }

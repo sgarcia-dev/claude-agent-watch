@@ -159,7 +159,7 @@ class CodexTests(unittest.TestCase):
                                    content=[{"text": "Latest\nPROGRESS 4/7"}])])
         out = self.probe()
         self.assertEqual(out["progress"], {"done": 4, "total": 7})
-        self.assertEqual(out["lastActivity"], "Latest")
+        self.assertEqual(out["lastMessage"], "Latest")
 
     def test_children_direct_and_nested_parent(self):
         self.rollout("parent", parent_thread_id=None)
@@ -199,11 +199,13 @@ class CodexTests(unittest.TestCase):
 
     def test_safe_command_activity_and_length(self):
         self.rollout(records=[item("function_call", name="exec_command",
-                                   arguments=json.dumps({"cmd": "echo " + "x" * 100}))])
-        self.assertEqual(self.probe()["lastActivity"], "exec_command: " + ("echo " + "x" * 100)[:60])
+                                   arguments=json.dumps({"cmd": "echo " + "word " * 100}))])
+        line = self.probe()["lastActivity"]
+        self.assertTrue(line.startswith("exec_command: echo word word"))
+        self.assertEqual(len(line), 300)
         self.rollout(records=[item("function_call", name="exec_command",
                                    arguments=json.dumps({"cmd": "echo --token synthetic-secret"}))])
-        self.assertEqual(self.probe()["lastActivity"], "exec_command")
+        self.assertEqual(self.probe()["lastActivity"], "exec_command: echo [hidden]")
 
     def test_missing_store(self):
         out = self.probe()

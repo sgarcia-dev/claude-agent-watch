@@ -18,6 +18,9 @@ export type Probed = {
   steps: number | null
   lastActivity: string | null
   lastActivityAt: number | null
+  // The agent's latest message in its own words, on one line.
+  lastMessage: string | null
+  lastMessageAt: number | null
   endedAt: number | null
   children: number | null
   error: string | null
@@ -40,7 +43,13 @@ export type Run = {
   sessionHint: string | null
   // A Claude subagent's status as the engine's agent list reports it.
   agentStatus: string | null
-  // Set when the launching tool call returned for a foreground run.
+  // The agent CLI's process, once the process scan finds it.
+  pid: number | null
+  // When the foreground Bash call that launched it returned. The run ends
+  // then unless its process lives on (a `cmd &` launch).
+  returnedAt: number | null
+  // When the run ended: its process exited, its tool call or background task
+  // ended, or the engine says so.
   exitedAt: number | null
   exitFailed: boolean
   // When the mod first saw the run finished; drives the linger time.

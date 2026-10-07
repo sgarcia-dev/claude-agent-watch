@@ -18,6 +18,7 @@ export function segments(command: string): string[][] {
   let word = ''
   let hasWord = false
   let quote: '"' | "'" | null = null
+  const heredocs: string[] = []
   const endWord = () => {
     if (hasWord) words.push(word)
     word = ''
@@ -45,8 +46,30 @@ export function segments(command: string): string[][] {
         word += n
         hasWord = true
       }
-    } else if (c === ';' || c === '&' || c === '|' || c === '\n' || c === '(' || c === ')') {
+    } else if (c === '\n') {
       endSegment()
+      // A heredoc body is data, not commands: skip to its closing line.
+      for (const delim of heredocs.splice(0)) {
+        while (i < command.length) {
+          const eol = command.indexOf('\n', i + 1)
+          const line = command.slice(i + 1, eol < 0 ? command.length : eol)
+          i = eol < 0 ? command.length : eol
+          if (line.replace(/^\t+/, '') === delim) break
+        }
+      }
+    } else if (c === ';' || c === '&' || c === '|' || c === '(' || c === ')') {
+      endSegment()
+    } else if (c === '<' && command[i + 1] === '<' && command[i + 2] !== '<') {
+      // `<<EOF`, `<<-'EOF'`: note the delimiter; the body starts next line.
+      endWord()
+      i += command[i + 2] === '-' ? 2 : 1
+      while (command[i + 1] === ' ') i++
+      let delim = ''
+      while (i + 1 < command.length && !' \t;&|\n()<>'.includes(command[i + 1] ?? ' ')) {
+        const d = command[++i] ?? ''
+        if (d !== '"' && d !== "'" && d !== '\\') delim += d
+      }
+      if (delim) heredocs.push(delim)
     } else if (c === ' ' || c === '\t') {
       endWord()
     } else if (c === '<' || c === '>') {
@@ -78,13 +101,19 @@ export function segments(command: string): string[][] {
 const WRAPPERS = new Set(['env', 'nohup', 'time', 'command', 'exec', 'caffeinate', 'timeout', 'gtimeout'])
 const ASSIGN = /^[A-Za-z_][A-Za-z0-9_]*=/
 
-// Drops leading `VAR=x`, `env`, `nohup`, `timeout 600` and similar.
+// Drops leading `VAR=x`, `env`, `nohup`, `timeout 600`, the perl alarm
+// wrapper and similar.
 function program(words: string[]): string[] {
   let i = 0
   while (i < words.length) {
     const w = words[i] ?? ''
     if (ASSIGN.test(w)) i++
-    else if (WRAPPERS.has(w)) {
+    else if (w === 'perl') {
+      // `perl -e 'alarm shift; exec @ARGV' 600 cmd ...`, the macOS timeout.
+      i++
+      while ((words[i] ?? '').startsWith('-')) i += words[i] === '-e' || words[i] === '-E' ? 2 : 1
+      if (/^\d+$/.test(words[i] ?? '')) i++
+    } else if (WRAPPERS.has(w)) {
       i++
       if ((w === 'timeout' || w === 'gtimeout') && /^\d/.test(words[i] ?? '')) i++
       while (i < words.length && (words[i] ?? '').startsWith('-')) i++
@@ -138,58 +167,67 @@ export function detect(command: string, cwd: string | null): Launch | null {
   let here = cwd
   for (const seg of segments(command)) {
     const words = program(seg)
-    if (words.length === 0) continue
     const name = base(words[0] ?? '')
-    const args = words.slice(1)
-    if (name === 'cd' && args[0]) {
-      here = joinPath(here, args[0])
+    if (name === 'cd' && words[1]) {
+      here = joinPath(here, words[1])
       continue
     }
-    if (isHelp(args)) continue
-    if (name === 'codex' && (args[0] === 'exec' || args[0] === 'e')) {
-      return {
-        tool: 'codex',
-        flagModel: flag(args, ['-m', '--model']),
-        flagEffort: codexEffort(args),
-        cwd: (() => {
-          const dir = flag(args, ['-C', '--cd'])
-          return dir ? joinPath(here, dir) : here
-        })(),
-      }
+    const launch = detectWords(words, here)
+    if (launch) return launch
+  }
+  return null
+}
+
+// One simple command's words, wrappers already dropped. The process scan
+// calls this with a running process's arguments.
+export function detectWords(words: string[], here: string | null): Launch | null {
+  if (words.length === 0) return null
+  const name = base(words[0] ?? '').replace(/\.(js|mjs|cjs|py|sh)$/, '')
+  const args = words.slice(1)
+  if (isHelp(args)) return null
+  if (name === 'codex' && (args[0] === 'exec' || args[0] === 'e')) {
+    return {
+      tool: 'codex',
+      flagModel: flag(args, ['-m', '--model']),
+      flagEffort: codexEffort(args),
+      cwd: (() => {
+        const dir = flag(args, ['-C', '--cd'])
+        return dir ? joinPath(here, dir) : here
+      })(),
     }
-    if (name === 'opencode' && args[0] === 'run') {
-      const model = flag(args, ['-m', '--model'])
-      const [id, variant] = model ? model.split('#') : [null, null]
-      return {
-        tool: 'opencode',
-        flagModel: id ?? null,
-        flagEffort: variant ?? flag(args, ['--variant']),
-        cwd: (() => {
-          const dir = flag(args, ['--dir', '--cwd'])
-          return dir ? joinPath(here, dir) : here
-        })(),
-      }
+  }
+  if (name === 'opencode' && args[0] === 'run') {
+    const model = flag(args, ['-m', '--model'])
+    const [id, variant] = model ? model.split('#') : [null, null]
+    return {
+      tool: 'opencode',
+      flagModel: id ?? null,
+      flagEffort: variant ?? flag(args, ['--variant']),
+      cwd: (() => {
+        const dir = flag(args, ['--dir', '--cwd'])
+        return dir ? joinPath(here, dir) : here
+      })(),
     }
-    if (name === 'agy' && args.some(w => w === '-p' || w === '--print' || w.startsWith('--prompt'))) {
-      return {
-        tool: 'agy',
-        flagModel: flag(args, ['--model', '-m']),
-        flagEffort: flag(args, ['--effort']),
-        cwd: here,
-      }
+  }
+  if (name === 'agy' && args.some(w => w === '-p' || w === '--print' || w.startsWith('--prompt'))) {
+    return {
+      tool: 'agy',
+      flagModel: flag(args, ['--model', '-m']),
+      flagEffort: flag(args, ['--effort']),
+      cwd: here,
     }
-    if (
-      name === 'hermes' &&
-      ((args[0] === 'chat' &&
-        args.some(w => w === '-q' || w === '--query' || w === '--query-file' || w === '--oneshot' || w.startsWith('--query'))) ||
-        args[0] === '-z')
-    ) {
-      return {
-        tool: 'hermes',
-        flagModel: flag(args, ['--model', '-m']),
-        flagEffort: flag(args, ['--reasoning', '--effort']),
-        cwd: here,
-      }
+  }
+  if (
+    name === 'hermes' &&
+    ((args[0] === 'chat' &&
+      args.some(w => w === '-q' || w === '--query' || w === '--query-file' || w === '--oneshot' || w.startsWith('--query'))) ||
+      args[0] === '-z')
+  ) {
+    return {
+      tool: 'hermes',
+      flagModel: flag(args, ['--model', '-m']),
+      flagEffort: flag(args, ['--reasoning', '--effort']),
+      cwd: here,
     }
   }
   return null
