@@ -163,8 +163,8 @@ def _read(conn, path: Path, out: dict, now_ms: int) -> None:
                     changed = max(changed, sidecar.stat().st_mtime_ns // 1_000_000)
                 except FileNotFoundError:
                     pass
-            if now_ms - changed >= QUIET_MS:
-                out["state"] = "done"
+            # A completed step with recent writes is a pause between steps.
+            out["state"] = "done" if now_ms - changed >= QUIET_MS else "running"
         name = _text(_at(latest["metadata"], 4, 2))
         if name and re.fullmatch(r"[A-Za-z][A-Za-z0-9_.:/-]{0,99}", name):
             out["lastActivity"] = common.one_line(name)

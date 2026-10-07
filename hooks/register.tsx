@@ -11,7 +11,7 @@ import { atom, read, update } from 'claude-code'
 import type { Register } from 'claude-code'
 
 import type { Probed, Run } from '../types'
-import { agentIdFrom, backgroundTaskId, detect } from './detect'
+import { agentIdFrom, backgroundTaskId, detect, taskEnds } from './detect'
 import {
   STATE_STYLE,
   TOOL_STYLE,
@@ -279,6 +279,24 @@ export const register: Register = on => {
       await update($, runsAtom, runs => patched(runs, id, { sessionHint, isBackground: true }))
     }
     return ran
+  }).catch(($, e, next) => next(e))
+
+  // A background CLI run is finished when Claude Code says so, whatever the
+  // tool's own files say yet.
+  on('session.append', async ($, e, next) => {
+    const stored = await next(e)
+    const ends = taskEnds(e.message.content)
+    if (ends.length === 0) return stored
+    const runs = (await read($, runsAtom)) ?? []
+    const now = await $.clock.now()
+    for (const end of ends) {
+      const run = runs.find(r => r.backgroundTaskId === end.taskId && r.exitedAt === null)
+      if (!run) continue
+      const exitFailed = end.status !== 'completed'
+      await update($, runsAtom, list => patched(list, run.id, { exitedAt: now, exitFailed }))
+      pollSoon?.(1_000)
+    }
+    return stored
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {

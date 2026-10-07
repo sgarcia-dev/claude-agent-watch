@@ -188,15 +188,15 @@ class AgyTests(unittest.TestCase):
         self.assertIsNone(out["error"])
         self.assertEqual(set(out), {"id", *common.FIELDS})
 
-    def test_recent_completion_and_wal_are_unknown(self):
+    def test_recent_completion_and_wal_are_running(self):
         path = self.session(modified=self.NOW - 29999)
-        self.assertEqual(agy.probe(self.run_input(), self.NOW)["state"], "unknown")
+        self.assertEqual(agy.probe(self.run_input(), self.NOW)["state"], "running")
         os.utime(path, ns=(self.START * 1_000_000,) * 2)
         # A journal's mtime also prevents a premature done status.
         journal = Path(str(path) + "-journal")
         journal.touch()
         os.utime(journal, ns=(self.NOW * 1_000_000,) * 2)
-        self.assertEqual(agy.probe(self.run_input(), self.NOW)["state"], "unknown")
+        self.assertEqual(agy.probe(self.run_input(), self.NOW)["state"], "running")
 
     def test_failed_or_aborted_latest_step(self):
         for status in (6, 7, 12):

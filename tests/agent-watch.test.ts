@@ -1,6 +1,6 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
-import { detect, segments } from '../hooks/detect'
+import { detect, segments, taskEnds } from '../hooks/detect'
 import { remaining, statusLine } from '../hooks/format'
 import type { Run } from '../types'
 
@@ -40,6 +40,12 @@ describe('detect', () => {
     expect(detect('opencode --version', '/r')).toBeNull()
     expect(detect('echo "run codex exec later; opencode run x"', '/r')).toBeNull()
     expect(detect('git status', '/r')).toBeNull()
+  })
+
+  test('reads background task endings from a notification row', () => {
+    const text = '<task-notification>\n<task-id>b123</task-id>\n<status>failed</status>\n</task-notification>'
+    expect(taskEnds([{ type: 'text', text }])).toEqual([{ taskId: 'b123', status: 'failed' }])
+    expect(taskEnds('plain text')).toEqual([])
   })
 
   test('splits on operators but not inside quotes', () => {

@@ -77,7 +77,8 @@ class ClaudeTests(unittest.TestCase):
         self.transcript("wrong-type", START + 200, agent_type="Plan")
         self.transcript("right", START)
         self.assertEqual(self.probe()["sessionId"], "right")
-        self.assertFalse(self.probe(sessionId="wrong-cwd")["found"])
+        # A known agent ID wins over the folder check (the mod's cwd can be stale).
+        self.assertTrue(self.probe(sessionId="wrong-cwd")["found"])
 
     def test_realpath_and_ancestor_project(self):
         alias = self.root / "alias"

@@ -41,6 +41,12 @@ def _record(line):
 
 
 def _paths(root, cwd, agent_id, deadline):
+    if agent_id:
+        # A known agent ID names its file; the session's project folder may
+        # not match the cwd the mod saw, so look it up directly.
+        found = sorted((root / "projects").glob(f"*/*/subagents/agent-{agent_id}.jsonl"))
+        if found:
+            return found[:1]
     if not cwd:
         return []
     directories = set()
@@ -82,11 +88,11 @@ def _candidate(path, run):
     agent_id = first.get("agentId") or path.stem.removeprefix("agent-")
     if agent_id in (run.get("claimed") or []):
         return None
+    if run.get("sessionId"):
+        return path if agent_id == run["sessionId"] else None
     cwd = first.get("cwd")
     if cwd and not common.same_dir(cwd, run.get("cwd")):
         return None
-    if run.get("sessionId"):
-        return path if agent_id == run["sessionId"] else None
     started = _milliseconds(first.get("timestamp"))
     if started is None or not common.in_link_window(started, run):
         return None

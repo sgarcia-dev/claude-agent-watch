@@ -14,7 +14,8 @@ except ImportError:  # agent_probe.py imports readers as top-level modules.
     import common
 
 
-CLI_SOURCES = ("cli", "oneshot", "tui", "api_server")
+# "tool" is what `hermes chat --source tool` writes (the task-hermes recipe).
+CLI_SOURCES = ("cli", "oneshot", "tui", "api_server", "tool")
 NORMAL_ENDS = {"agent_close", "cli_close", "session_reset", "session_switch"}
 FAILED_ENDS = {"startup_orphan_reap"}
 SESSION_FIELDS = (
@@ -151,7 +152,7 @@ def probe(run: dict, now_ms: int) -> dict:
                     "SELECT id, started_at, cwd FROM sessions "
                     "WHERE started_at >= ? AND started_at < ? "
                     "AND parent_session_id IS NULL "
-                    "AND source IN ('cli', 'oneshot', 'tui', 'api_server') "
+                    "AND source IN ('cli', 'oneshot', 'tui', 'api_server', 'tool') "
                     "ORDER BY started_at ASC",
                     ((run["startedAt"] - common.LINK_BEFORE_MS) / 1000,
                      (run["startedAt"] + common.LINK_AFTER_MS) / 1000),

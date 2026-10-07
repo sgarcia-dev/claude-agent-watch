@@ -206,3 +206,18 @@ export function agentIdFrom(text: string | undefined): string | null {
   const m = /agentId:\s*([A-Za-z0-9_-]+)/.exec(text ?? '')
   return m ? m[1] ?? null : null
 }
+
+// Claude Code tells the model a background command ended with a
+// <task-notification> row naming the task ID and its status.
+export function taskEnds(content: unknown): { taskId: string; status: string }[] {
+  const text = typeof content === 'string'
+    ? content
+    : Array.isArray(content)
+      ? content.map(b => (b && typeof b === 'object' && typeof (b as { text?: unknown }).text === 'string' ? (b as { text: string }).text : '')).join('\n')
+      : ''
+  if (!text.includes('<task-id>')) return []
+  const out: { taskId: string; status: string }[] = []
+  const re = /<task-id>([^<]+)<\/task-id>[\s\S]*?<status>([^<]+)<\/status>/g
+  for (let m = re.exec(text); m; m = re.exec(text)) out.push({ taskId: (m[1] ?? '').trim(), status: (m[2] ?? '').trim() })
+  return out
+}

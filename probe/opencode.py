@@ -92,7 +92,10 @@ def probe(run: dict, now_ms: int) -> dict:
         if conn.execute("SELECT 1 FROM session_pending WHERE session_id=? AND type IN ('question','permission') LIMIT 1", (sid,)).fetchone():
             out['state'] = 'waiting'
         elif idle is not None:
-            out['state'] = {'succeeded': 'done', 'failed': 'failed', 'interrupted': 'failed'}.get(session['idle_outcome'], 'unknown')
+            # Idle with no outcome yet is a pause between turns, not the end.
+            outcome = session['idle_outcome']
+            out['state'] = 'running' if outcome is None else {
+                'succeeded': 'done', 'failed': 'failed', 'interrupted': 'failed'}.get(outcome, 'unknown')
             if out['state'] in ('done', 'failed'):
                 out['endedAt'] = idle
         elif session['time_suspended'] is None:
