@@ -183,6 +183,11 @@ def _read(path, meta, out):
                     out["state"] = "running"
                 out["lastActivity"] = _activity(payload)
                 out["lastActivityAt"] = stamp
+                # Some models print PROGRESS from a shell command instead.
+                args = payload.get("arguments", payload.get("input"))
+                progress = common.find_progress(args if isinstance(args, str) else None)
+                if progress is not None:
+                    out["progress"] = progress
             elif typ in ("function_call_output", "custom_tool_call_output"):
                 if pending is not None and payload.get("call_id") == pending:
                     pending = None

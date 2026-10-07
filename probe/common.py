@@ -133,8 +133,12 @@ def redact(text: str) -> str:
 
 
 def message_line(text: str | None) -> str | None:
-    """An agent's own words on one line, credentials hidden."""
-    if not text:
+    """An agent's own words on one line, credentials hidden.
+
+    None for a message that is only a PROGRESS marker, so readers keep
+    looking for the last real sentence.
+    """
+    if not text or not " ".join(PROGRESS_RE.sub("", str(text)).split()):
         return None
     return one_line(redact(str(text)), LINE_LIMIT)
 

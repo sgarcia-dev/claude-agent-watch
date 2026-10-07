@@ -115,7 +115,9 @@ def _fill(out: dict, row: sqlite3.Row, conn, root: Path, store: Path):
         " ORDER BY timestamp DESC, id DESC LIMIT 100", (row["id"],)
     ).fetchall()
     for message in messages:
-        progress = common.find_progress(message["content"]) or common.find_progress(message["items"])
+        # Some models print PROGRESS from a shell command instead.
+        progress = (common.find_progress(message["content"]) or common.find_progress(message["items"])
+                    or common.find_progress(message["tool_calls"]))
         if progress is not None:
             out["progress"] = progress
             break

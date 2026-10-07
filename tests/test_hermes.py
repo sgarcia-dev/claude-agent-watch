@@ -172,6 +172,18 @@ class HermesTests(unittest.TestCase):
         self.message("No progress here", 1006)
         self.assertEqual(self.probe()["progress"], {"done": 3, "total": 7})
 
+    def test_progress_printed_from_a_shell_command(self):
+        self.session()
+        with sqlite3.connect(self.database) as conn:
+            conn.execute("ALTER TABLE messages ADD COLUMN tool_calls TEXT")
+            calls = json.dumps([{"function": {"name": "terminal", "arguments": json.dumps(
+                {"command": "sleep 15; printf 'PROGRESS 4/6\\n'"})}}])
+            conn.execute("INSERT INTO messages (session_id,role,content,timestamp,tool_calls) "
+                         "VALUES (?,?,?,?,?)", ("session-test", "assistant", "", 1001, calls))
+        out = self.probe()
+        self.assertEqual(out["progress"], {"done": 4, "total": 6})
+        self.assertTrue(out["lastActivity"].startswith("terminal: sleep 15"))
+
     def test_progress_invalid_and_tail_limit(self):
         self.session()
         self.message("PROGRESS 2/0\nPROGRESS 8/7", 1001)

@@ -9,7 +9,8 @@ When Claude starts one, a pane opens with one block per agent:
 ◆ Codex  Codex worker for the reader
   running 4m12s · gpt-6.1-sol medium
   ctx ████░░░░░░ 38% 98k/258k   progress ███░░░░░░░ 3/7 ~5m35s left
-  now: exec: python3 -m unittest (20s ago)
+  now: exec_command: python3 -m unittest discover -s tests -t . · 20s ago
+  said: The reader tests pass; next I check the Hermes store.
 ```
 
 A short version sits in the status line: `◆ codex 4m12s 3/7 ctx 38%`.
@@ -25,7 +26,8 @@ line clears.
 | Model and effort really used | yes | yes | yes | yes | yes |
 | Context used / window | yes | yes | no | yes | yes (window is a fixed rule) |
 | Progress and time left | with PROGRESS lines | with PROGRESS lines | with PROGRESS lines | with PROGRESS lines | with PROGRESS lines |
-| What it is doing now | yes | yes | step type only | yes | yes |
+| What it is doing now (last tool call) | yes | yes | step type only | yes | yes |
+| What it said last (its own words) | yes | yes | yes | yes | yes |
 | Native child count | yes | yes | no | yes | no |
 
 Every value comes from the tool's own session files on disk. Anything the
@@ -71,13 +73,21 @@ only when the terminal is at least 144 columns wide. Otherwise type
 - `/agent-watch poll`: check now instead of waiting up to 5 seconds.
 - `/agent-watch clear`: drop finished agents from the list.
 
-It detects these launch shapes in Bash commands (after `cd`, `VAR=x`, `env`,
-`nohup` or `timeout`):
+It finds agents two ways, so nothing about how you launch them has to change:
 
-- `codex exec ...` (model from `-m`, effort from `-c model_reasoning_effort=`)
-- `opencode run ...` (model and variant from `--model provider/model#variant`)
-- `agy -p ...` (from `--model` and `--effort`)
-- `hermes chat -q/--query/--query-file/--oneshot ...` (from `--model` and `--reasoning`)
+1. **The command.** A Bash command that plainly starts an agent shows at
+   once, labeled with the command's description. It reads through `cd`,
+   `VAR=x`, `env`, `nohup`, `timeout` and the `perl -e 'alarm shift; exec
+   @ARGV' N` timeout wrapper, and skips heredoc bodies.
+   - `codex exec ...` (model from `-m`, effort from `-c model_reasoning_effort=`)
+   - `opencode run ...` (model and variant from `--model provider/model#variant`)
+   - `agy -p ...` (from `--model` and `--effort`)
+   - `hermes chat -q/--query/--query-file/--oneshot ...` (from `--model` and `--reasoning`)
+2. **The process list.** Each check also looks for those agent processes
+   started by this Claude Code session: anything under its process, or a
+   process detached with `&` that started while one of its Bash commands ran.
+   This catches launch scripts (`./run.sh`), loops that start several
+   workers, and wrappers. A row ends when its process exits.
 
 ## Change it
 
@@ -119,7 +129,13 @@ line above.
 ## Limits
 
 - It watches agents Claude launches in this session, not ones you start by
-  hand in another terminal.
+  hand in another terminal. One edge: an agent you start by hand, detached,
+  in the same second one of this session's Bash commands runs, could be
+  counted here.
+- Exact process arguments and start times come from macOS `sysctl` calls.
+  Elsewhere the scan falls back to `ps` output, which is coarser: labels
+  for processes found this way may name the wrong Bash command. Only macOS
+  has been tested.
 - A run is matched to its session by start time (within 2 minutes) and folder.
   Two runs of one tool started in the same second could swap.
 - Antigravity stores sessions in an undocumented binary format. Its reader
@@ -127,7 +143,10 @@ line above.
   unknown.
 - Claude subagent context windows use a fixed rule (200k, or 1M for `[1m]`
   models). The transcripts do not state it.
-- The pane refreshes every 5 seconds. Each check is a local Python run over session files: no tokens, about 50 to 100 ms of CPU, and nothing at all when no agent is tracked.
+- The pane refreshes every 5 seconds. Each check is a local Python run over
+  session files and the process list: no tokens, about 50 to 100 ms of CPU.
+  It runs only while an agent is tracked, a Bash command is running or ended
+  in the last 15 seconds, or a background Bash task is open.
 - Store formats change between tool versions. Readers were written against
   Codex 0.160.0, OpenCode 2.0.22, agy 1.3.0, Hermes 0.21.5 and Claude Code
   2.1.292.

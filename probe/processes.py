@@ -14,13 +14,21 @@ children) count once, as their topmost agent process.
 
 from __future__ import annotations
 
+import ctypes
 import os
 import re
+import struct
 import subprocess
 import time
 
 INTERPRETERS = re.compile(r"^(bash|sh|zsh|dash|node|bun|deno|perl|ruby|python[0-9.]*)$")
 SCRIPT_EXT = re.compile(r"\.(js|mjs|cjs|py|sh)$")
+# Codex options that take a value. Wrappers (a terminal app's shim, say) put
+# global options before the subcommand: `codex --enable hooks -c k=v exec`.
+CODEX_VALUE_FLAGS = {"-c", "--config", "--enable", "--disable", "-m", "--model", "-C", "--cd",
+                     "-p", "--profile", "-s", "--sandbox", "-a", "--ask-for-approval", "-i",
+                     "--image", "--add-dir", "--local-provider"}
+NAMES_RE = re.compile(r"codex|opencode|agy|hermes")
 WINDOW_BEFORE_MS = 2_000
 WINDOW_AFTER_MS = 3_000
 
@@ -29,23 +37,45 @@ def _base(word: str) -> str:
     return SCRIPT_EXT.sub("", word.rsplit("/", 1)[-1])
 
 
-def agent_words(words: list[str]) -> tuple[str, list[str]] | None:
-    """(tool, words from the tool name on) when this argv runs an agent task."""
+def _codex_subcommand(args: list[str]) -> int | None:
+    """Index of Codex's subcommand, past any global options."""
     i = 0
+    while i < len(args) and args[i].startswith("-"):
+        i += 2 if args[i] in CODEX_VALUE_FLAGS else 1
+    return i if i < len(args) else None
+
+
+def agent_words(words: list[str]) -> tuple[str, list[str]] | None:
+    """(tool, words from the tool name on) when this argv runs an agent task.
+
+    Codex words come back with the subcommand first: `codex exec <options>`.
+    """
+    i = 0
+    script = None
     if words and INTERPRETERS.match(_base(words[0])):
         i = 1
         while i < len(words) and words[i].startswith("-"):
-            # `perl -e <script>` and `node --flag` take no agent word here.
-            i += 2 if words[i] in ("-e", "-c") else 1
+            # `perl -e <script>`, `python3 -c <script>`: the next word is code.
+            if words[i] in ("-e", "-c") and i + 1 < len(words):
+                script = words[i + 1]
+                i += 2
+            else:
+                i += 1
     rest = words[i:]
+    if script is not None and "hermes_cli" in script:
+        # Hermes's launcher: python3 -I -c '<bootstrap>' chat --query-file ...
+        rest = ["hermes"] + rest
     if not rest:
         return None
     name, args = _base(rest[0]), rest[1:]
     if any(a in ("--help", "-h", "--version", "-V") for a in args):
         return None
     first = args[0] if args else ""
-    if name == "codex" and first in ("exec", "e"):
-        return "codex", rest
+    if name == "codex":
+        at = _codex_subcommand(args)
+        if at is not None and args[at] in ("exec", "e"):
+            return "codex", [rest[0], args[at]] + args[:at] + args[at + 1:]
+        return None
     if name == "opencode" and first == "run":
         return "opencode", rest
     if name == "agy" and any(a in ("-p", "--print") or a.startswith("--prompt") for a in args):
@@ -78,6 +108,55 @@ def _table() -> dict[int, tuple[int, int | None, list[str]]]:
         age = _etime_ms(parts[2])
         table[int(parts[0])] = (int(parts[1]), None if age is None else now - age, parts[3].split())
     return table
+
+
+_libc = None
+
+
+def _argv(pid: int) -> list[str] | None:
+    """A process's exact arguments (KERN_PROCARGS2), or None if hidden.
+
+    ps joins arguments with spaces, which loses where a prompt or a -c script
+    starts and ends. macOS hides other processes' environment, not argv.
+    """
+    global _libc
+    try:
+        if _libc is None:
+            _libc = ctypes.CDLL("/usr/lib/libc.dylib")
+        mib = (ctypes.c_int * 3)(1, 49, pid)  # CTL_KERN, KERN_PROCARGS2
+        size = ctypes.c_size_t(0)
+        if _libc.sysctl(mib, 3, None, ctypes.byref(size), None, 0) != 0:
+            return None
+        buf = ctypes.create_string_buffer(size.value)
+        if _libc.sysctl(mib, 3, buf, ctypes.byref(size), None, 0) != 0:
+            return None
+        raw = buf.raw[:size.value]
+        argc = struct.unpack("i", raw[:4])[0]
+        rest = raw[4:]
+        rest = rest[rest.index(b"\0"):].lstrip(b"\0")  # skip the executable path
+        args = rest.split(b"\0")[:argc]
+        return [a.decode("utf-8", errors="replace") for a in args]
+    except (OSError, ValueError, AttributeError, struct.error):
+        return None
+
+
+def _start_ms(pid: int) -> int | None:
+    """Exact start time (KERN_PROC_PID); ps gives whole seconds only."""
+    global _libc
+    try:
+        if _libc is None:
+            _libc = ctypes.CDLL("/usr/lib/libc.dylib")
+        mib = (ctypes.c_int * 4)(1, 14, 1, pid)  # CTL_KERN, KERN_PROC, KERN_PROC_PID
+        buf = ctypes.create_string_buffer(1024)
+        size = ctypes.c_size_t(1024)
+        if _libc.sysctl(mib, 4, buf, ctypes.byref(size), None, 0) != 0 or size.value < 16:
+            return None
+        # kinfo_proc starts with extern_proc, whose first field is the start
+        # time as a timeval: 64-bit seconds, 32-bit microseconds.
+        seconds, micros = struct.unpack("qi", buf.raw[:12])
+        return seconds * 1000 + micros // 1000 if seconds > 0 else None
+    except (OSError, ValueError, AttributeError, struct.error):
+        return None
 
 
 def _is_claude(words: list[str]) -> bool:
@@ -135,7 +214,9 @@ def scan(windows, known) -> list[dict]:
     mine = _claude_pid(table)
     agents = {}
     for pid, (_, started, words) in table.items():
-        found = agent_words(words)
+        if not NAMES_RE.search(" ".join(words)):
+            continue
+        found = agent_words(_argv(pid) or words)
         if found:
             agents[pid] = (found, started)
     result = []
@@ -148,7 +229,12 @@ def scan(windows, known) -> list[dict]:
                 continue
             if not _in_window(started, windows):
                 continue
-        result.append({"pid": pid, "tool": tool, "words": words[:200], "startedAt": started, "cwd": None})
+        # The shell Claude Code started for the Bash call: its start time
+        # names the call, more surely than the agent's own start time.
+        shell = next((c for c, parent in zip([pid] + chain, chain) if parent == mine), None)
+        result.append({"pid": pid, "tool": tool, "words": [w[:300] for w in words[:200]],
+                       "startedAt": _start_ms(pid) or started,
+                       "shellStartedAt": _start_ms(shell) if shell else None, "cwd": None})
     known = set(known or [])
     cwds = _cwds([p["pid"] for p in result if p["pid"] not in known])
     for p in result:

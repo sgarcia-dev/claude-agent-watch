@@ -31,6 +31,9 @@ export type SeenProcess = {
   tool: Exclude<ToolName, 'claude'>
   words: string[]
   startedAt: number | null
+  // Start of the shell Claude Code ran the Bash call in, when the process
+  // still descends from it.
+  shellStartedAt?: number | null
   cwd: string | null
 }
 
@@ -85,8 +88,13 @@ export function trimCalls(calls: readonly BashCall[], now: number): BashCall[] {
   return calls.filter(c => c.endedAt === null || now - c.endedAt < OPEN_TASK_MS).slice(-50)
 }
 
-function callAt(calls: readonly BashCall[], at: number, now: number): BashCall | undefined {
-  return [...calls].reverse().find(c => at >= c.startedAt - SLACK_MS && at <= (c.endedAt ?? now) + SLACK_MS)
+// The Bash call that started a process: the latest call that began before
+// its shell did (or before the process, for an orphan) and had not ended.
+function callFor(calls: readonly BashCall[], p: SeenProcess, now: number): BashCall | undefined {
+  const at = p.shellStartedAt ?? p.startedAt ?? now
+  return [...calls]
+    .filter(c => c.startedAt <= at + 250 && (p.shellStartedAt != null || at <= (c.endedAt ?? now) + SLACK_MS))
+    .sort((a, b) => b.startedAt - a.startedAt)[0]
 }
 
 // Folds one process scan into the runs:
@@ -123,7 +131,7 @@ export function mergeProcesses(
         continue
       }
       const launch = detectWords(p.words, p.cwd)
-      const call = callAt(calls, at, now)
+      const call = callFor(calls, p, now)
       const base = call?.description || labelFor(p.words.join(' '), p.tool)
       const twins = next.filter(r => r.label === base || r.label.startsWith(`${base} (`)).length
       next.push(newRun({

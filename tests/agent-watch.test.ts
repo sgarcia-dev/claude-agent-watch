@@ -159,6 +159,17 @@ describe('process scan', () => {
     expect(mergeProcesses([run], null, [], new Set(), 3_000).runs[0]?.exitedAt).toBe(1_500)
   })
 
+  test('a process is labeled by the call whose shell started it, not a later call', () => {
+    const calls = [
+      call({ id: 'a', startedAt: 1_000, endedAt: null, isBackground: true, description: 'Script A' }),
+      call({ id: 'b', startedAt: 1_900, endedAt: 2_000, description: 'Read the pane' }),
+    ]
+    const fromA = { ...proc(41, 2_100), shellStartedAt: 1_400 }
+    expect(mergeProcesses([], [fromA], calls, new Set(), 3_000).runs[0]?.label).toBe('Script A')
+    const orphan = proc(42, 1_950)
+    expect(mergeProcesses([], [orphan], calls, new Set(), 3_000).runs[0]?.label).toBe('Read the pane')
+  })
+
   test('a process already shown never comes back as a new run', () => {
     expect(mergeProcesses([], [proc(31, 500)], [], new Set([31]), 2_000).added).toBe(0)
   })

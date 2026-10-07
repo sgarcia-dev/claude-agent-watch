@@ -73,16 +73,43 @@ for anything unknown. Never guess a value.
 | `outputTokens` | int or null | Total output tokens so far (reasoning included) |
 | `progress` | `{"done": n, "total": m}` or null | Latest `PROGRESS n/m` line the agent wrote |
 | `steps` | int or null | Count of model requests or tool calls so far |
-| `lastActivity` | string or null | One line, at most 120 characters: what it did last |
+| `lastActivity` | string or null | One line, at most 300 characters: the last tool call and its argument |
 | `lastActivityAt` | int or null | Epoch ms of that activity |
+| `lastMessage` | string or null | One line, at most 300 characters: the agent's latest message, skipping messages that are only a PROGRESS marker |
+| `lastMessageAt` | int or null | Epoch ms of that message |
 | `endedAt` | int or null | Epoch ms the session finished, when known |
 | `children` | int or null | Native subagents this session started |
 | `error` | string or null | Why the reader failed for this run (never raise) |
 
-`lastActivity` is metadata, not content: a tool name with a short argument
-(`exec: npm test`), or the first line of the latest assistant message. Run it
-through `common.one_line()`. It must never include secrets the session saw;
-prefer the tool name over a long argument when in doubt.
+Build `lastActivity` with `common.tool_summary(name, args)` (the whole
+command, a file's name, or a pattern) and `lastMessage` with
+`common.message_line(text)`. Both replace credential-looking values with
+`[hidden]` (`common.redact`). The pane cuts each line to its width.
+
+## Process scan
+
+When the request has `"scan": {"windows": [[start, end|null], ...], "known": [pid, ...]}`,
+the answer also has `processes`: the agent CLI processes this Claude Code
+session started (`probe/processes.py`). A process counts when:
+
+1. the probe's nearest `claude` ancestor is also its ancestor, or
+2. it is orphaned (no `claude` ancestor at all, as after `cmd &` in a shell
+   that exited) and started inside one of `windows` (2 s before to 3 s
+   after). The mod sends each foreground Bash call's span and each
+   background call's first 5 seconds.
+
+A task process counts: `codex [global options] exec|e`, `opencode run`,
+`agy -p`, `hermes chat -q|--query*|--oneshot` or `hermes -z`, also behind an
+interpreter (`bash shim`, `node codex.js`, Hermes's `python3 -c` launcher).
+Servers (`codex app-server`, `opencode serve`) do not. A matching process
+under another matching process (a wrapper's real binary) counts once.
+
+Each entry: `pid`, `tool`, `words` (exact argv from `KERN_PROCARGS2`, the
+tool name first; Codex with its subcommand second), `startedAt` (exact,
+`KERN_PROC_PID`), `shellStartedAt` (start of the shell Claude Code ran the
+Bash call in, or null for an orphan), `cwd` (from `lsof`, skipped for
+`known` pids). If the scan fails, `processes` is null and `scanError` says
+why.
 
 ## Reader module shape
 
