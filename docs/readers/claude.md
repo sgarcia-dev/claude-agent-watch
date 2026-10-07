@@ -70,3 +70,9 @@ Older sessions outside these bounds may not be found.
 Tests build synthetic stores through the root override.
 They include isolated entry point execution and split response usage.
 The repository needs `tests/__init__.py` for discovery with `-t .` on Python 3.11.
+
+## Quirks found live (2026-10-07)
+
+- The mod's cwd can point at the wrong project folder once the shell moves.
+  A known agent ID finds `projects/*/*/subagents/agent-<id>.jsonl` directly
+  and skips the folder check.

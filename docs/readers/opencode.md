@@ -22,8 +22,7 @@ A missing model, catalog, or context limit leaves that field null.
 `session_pending` is checked by `session_id` and `type`.
 A pending `question` or `permission` sets `state` to `waiting`.
 The inspected store had no pending rows. Check type names if this changes.
-Without pending work, null `time_idle` means `running` unless suspended.
-A nonnull `time_suspended` without an idle outcome means `unknown`.
+Without pending work, null `time_idle` means `running`.
 With `time_idle`, `idle_outcome` maps `succeeded` to `done`.
 `failed` and `interrupted` map to `failed`.
 Other idle outcomes mean `unknown`.
@@ -61,3 +60,12 @@ Missing activity or progress leaves the respective fields null.
 A missing database returns `found: false` without an error.
 `error` is null on success. Failures report only the exception type.
 SQL work has a 1.5 second deadline. Indexed session lookups bound message reads.
+
+## Quirks found live (2026-10-07)
+
+- Headless `opencode run` sessions get `time_suspended` at start. It does
+  not mean paused: a session that is not idle is `running`.
+- Idle with a null `idle_outcome` is a pause between turns: `running`.
+- The newest assistant message has no `tokens` while streaming. Context
+  comes from the newest message that has them.
+- Tool arguments live in `content[].state.input` (`command`, `path`).

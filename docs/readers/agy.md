@@ -76,3 +76,11 @@ New links inspect at most 128 recently modified databases.
 Progress inspects at most 128 recent steps. Blobs are limited to 2 MB.
 SQLite reads have a 1.5 second deadline and short busy waits.
 Older unlinked conversations can fall outside these bounds.
+
+## Quirks found live (2026-10-07)
+
+- Field 19 of the generation metadata holds an internal model ID
+  (`gemini-3.8-flash-n`). The requested name with its effort suffix
+  (`gemini-3.8-flash-medium`) is also in the blob and is preferred.
+- A completed last step with writes in the last 30 seconds is a pause
+  between steps: `running`, not `unknown`.

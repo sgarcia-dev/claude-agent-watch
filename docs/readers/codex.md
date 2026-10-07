@@ -71,3 +71,11 @@ Children on later dates are outside this bounded scan.
 The reader echoes id and returns found and sessionId for a linked rollout.
 Error stays null on success. Exceptions become short class names without paths.
 If Codex moves fields or changes record types, update these mappings and fixtures.
+
+## Quirks found live (2026-10-07)
+
+- In code mode, tool calls are `custom_tool_call` records named `exec` whose
+  `input` is JavaScript, such as `tools.exec_command({cmd:"cat x"})`. The
+  reader parses the last such call, skipping `write_stdin`.
+- Spawned children carry `parent_thread_id` in `session_meta`. Runs never
+  link to a child; children are counted for the parent.
