@@ -2,6 +2,10 @@
 
 import type { Run, RunState, ToolName } from '../types'
 
+// The probe links a session that starts within 2 minutes of the launch;
+// give up a little after that.
+export const LINK_GIVE_UP_MS = 150_000
+
 export const TOOL_STYLE: Record<ToolName, { glyph: string; color: string; name: string }> = {
   codex: { glyph: '◆', color: '#10a37f', name: 'Codex' },
   opencode: { glyph: '■', color: '#4f8cff', name: 'OpenCode' },
@@ -35,12 +39,15 @@ export function stateOf(run: Run): RunState {
   if (run.exitedAt !== null) return run.exitFailed ? 'failed' : 'done'
   if (probed === 'waiting') return 'waiting'
   if (probed === 'running') return 'running'
-  return run.probe?.found ? 'unknown' : 'starting'
+  if (run.probe?.found) return 'unknown'
+  // Past the window a session could start in, this run will never link.
+  if (run.probedAt !== null && run.probedAt - run.startedAt > LINK_GIVE_UP_MS) return 'lost'
+  return 'starting'
 }
 
 export function isActive(run: Run): boolean {
   const s = stateOf(run)
-  return s !== 'done' && s !== 'failed'
+  return s !== 'done' && s !== 'failed' && s !== 'lost'
 }
 
 export function endOf(run: Run): number | null {
@@ -102,6 +109,7 @@ export const STATE_STYLE: Record<RunState, { word: string; color: string }> = {
   waiting: { word: 'needs input', color: 'warning' },
   done: { word: 'done', color: 'inactive' },
   failed: { word: 'failed', color: 'error' },
+  lost: { word: 'no session found', color: 'warning' },
   unknown: { word: 'running?', color: 'subtle' },
 }
 

@@ -1,6 +1,7 @@
 export type ToolName = 'codex' | 'opencode' | 'agy' | 'hermes' | 'claude'
 
-export type RunState = 'starting' | 'running' | 'waiting' | 'done' | 'failed' | 'unknown'
+// 'lost': no session matched within the link window, so none ever will.
+export type RunState = 'starting' | 'running' | 'waiting' | 'done' | 'failed' | 'lost' | 'unknown'
 
 // What the probe reports for one run. Every field may be unknown.
 export type Probed = {

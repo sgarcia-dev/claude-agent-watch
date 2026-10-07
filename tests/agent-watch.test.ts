@@ -1,7 +1,7 @@
 import { describe, expect, mock, test } from 'claude-code/testing'
 
 import { detect, segments, taskEnds } from '../hooks/detect'
-import { remaining, statusLine } from '../hooks/format'
+import { isActive, remaining, stateOf, statusLine } from '../hooks/format'
 import type { Run } from '../types'
 
 const PANE = { plugin: 'agent-watch', component: 'Pane', requestId: 'agent-watch' } as const
@@ -87,6 +87,14 @@ describe('format', () => {
     expect(remaining(sampleRun({ probe }), 60_000)).toBe(180_000)
   })
 
+  test('a run never linked past the window is lost, not running forever', () => {
+    const notFound = { found: false } as Run['probe']
+    expect(stateOf(sampleRun({ probe: notFound, probedAt: 60_000 }))).toBe('starting')
+    const lost = sampleRun({ probe: notFound, probedAt: 200_000 })
+    expect(stateOf(lost)).toBe('lost')
+    expect(isActive(lost)).toBe(false)
+  })
+
   test('the status line hides when nothing runs', () => {
     expect(statusLine([sampleRun({ exitedAt: 5, finishedAt: 5 })], 10)).toBeUndefined()
     expect(statusLine([sampleRun({})], 125_000)).toBe('◆ codex 2m05s')
@@ -142,7 +150,7 @@ describe('the mod', () => {
       await ui.unmount()
     }
 
-    await clock.advance(9_000)
+    await clock.advance(4_000)
 
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ ...PANE, surface, props: PANE_PROPS })
@@ -151,6 +159,6 @@ describe('the mod', () => {
       expect(await ui.find({ text: /exec: npm test/ })).toBeDefined()
       await ui.unmount()
     }
-    expect(statuses.at(-1)).toBe('◆ codex 8s 2/5 ctx 25%')
+    expect(statuses.at(-1)).toBe('◆ codex 3s 2/5 ctx 25%')
   })
 })

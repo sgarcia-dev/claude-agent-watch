@@ -10,6 +10,7 @@ from typing import Iterable
 PROGRESS_RE = re.compile(r"PROGRESS\s+(\d+)\s*/\s*(\d+)")
 LINK_BEFORE_MS = 5_000
 LINK_AFTER_MS = 120_000
+LINK_END_SLACK_MS = 2_000
 
 FIELDS = (
     "found", "sessionId", "state", "model", "effort", "contextUsed",
@@ -49,7 +50,12 @@ def same_dir(a: str | None, b: str | None) -> bool:
 
 def in_link_window(started_ms: float, run: dict) -> bool:
     start = run["startedAt"]
-    return start - LINK_BEFORE_MS <= started_ms < start + LINK_AFTER_MS
+    if not start - LINK_BEFORE_MS <= started_ms < start + LINK_AFTER_MS:
+        return False
+    # A run that already ended (a launch that failed at once) cannot own a
+    # session that started after it; that session belongs to a later run.
+    ended = run.get("endedBy")
+    return ended is None or started_ms <= ended + LINK_END_SLACK_MS
 
 
 def pick_session(candidates: Iterable[dict], run: dict) -> dict | None:
@@ -85,7 +91,9 @@ def find_progress(text: str | None) -> dict | None:
 def one_line(text: str | None, limit: int = 120) -> str | None:
     if not text:
         return None
-    line = " ".join(str(text).split())
+    # PROGRESS markers already show as the progress bar; keep the real text.
+    stripped = PROGRESS_RE.sub("", str(text))
+    line = " ".join(stripped.split()) or " ".join(str(text).split())
     if not line:
         return None
     return line if len(line) <= limit else line[: limit - 1] + "…"

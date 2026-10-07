@@ -158,14 +158,11 @@ def probe(run: dict, now_ms: int) -> dict:
                      (run["startedAt"] + common.LINK_AFTER_MS) / 1000),
                 )
                 for row in rows:
-                    if row["cwd"] and not common.same_dir(row["cwd"], run.get("cwd")):
-                        continue
                     candidates.append({"id": row["id"], "startedAt": row["started_at"] * 1000,
                                        "cwd": row["cwd"], "connection": conn, "store": path})
             except Exception as exc:
                 errors.append(f"Hermes store read failed: {type(exc).__name__}")
-        # Cwd was filtered above. Missing cwd remains eligible by the contract.
-        chosen = common.pick_session(candidates, {**run, "cwd": None})
+        chosen = common.pick_session(candidates, run)
         if chosen:
             conn = chosen["connection"]
             row = conn.execute(f"SELECT {SESSION_FIELDS} FROM sessions WHERE id = ?",

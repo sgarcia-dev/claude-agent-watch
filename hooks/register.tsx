@@ -32,7 +32,8 @@ import {
 } from './format'
 
 const PANE = 'agent-watch'
-const POLL_MS = 30_000
+// Each check is a local Python run over session files: no tokens, ~50-100 ms.
+const POLL_MS = 5_000
 // A finished run stays on screen this long before it drops off.
 const LINGER_MS = 5 * 60_000
 // A run the probe never links and no tool call ends is dropped after this.
@@ -89,7 +90,8 @@ function probeRequest(runs: Run[], all: Run[], now: number): string {
       tool: r.tool,
       startedAt: r.startedAt,
       cwd: r.cwd,
-      command: r.tool === 'claude' ? r.label : r.command,
+      command: r.command,
+      endedBy: r.exitedAt,
       sessionId: r.probe?.sessionId ?? r.sessionHint,
       claimed: claimed(r.tool, r.id),
     })),
@@ -135,8 +137,11 @@ function applyProbe(
 
 function finishToast(run: Run, now: number): string {
   const style = TOOL_STYLE[run.tool]
-  const verb = stateOf(run) === 'failed' ? 'failed after' : 'finished in'
-  return `${style.glyph} ${run.tool === 'claude' ? run.label : style.name} ${verb} ${duration(elapsed(run, now))}`
+  const name = run.tool === 'claude' ? run.label : style.name
+  const state = stateOf(run)
+  if (state === 'lost') return `${style.glyph} ${name}: no session found to watch`
+  const verb = state === 'failed' ? 'failed after' : 'finished in'
+  return `${style.glyph} ${name} ${verb} ${duration(elapsed(run, now))}`
 }
 
 export const register: Register = on => {
@@ -152,6 +157,8 @@ export const register: Register = on => {
       try {
         const now = await $.clock.now()
         const before = (await read($, runsAtom)) ?? []
+        // Idle: no process, no state writes, no redraws.
+        if (before.length === 0) return
         const toProbe = before.filter(r => (isActive(r) || !r.probe?.found) && now - r.startedAt < STALE_MS)
         let answers = new Map<string, Probed>()
         if (toProbe.length > 0) {
@@ -231,7 +238,7 @@ export const register: Register = on => {
     await update($, runsAtom, runs => withRun(runs, run))
     void $.ui.open({ id: PANE, title: 'Agents' })
     $.ui.status(statusLine((await read($, runsAtom)) ?? [], startedAt))
-    pollSoon?.(8_000)
+    pollSoon?.(3_000)
 
     const ran = await next(e)
     if (e.run_in_background === true) {
@@ -262,7 +269,7 @@ export const register: Register = on => {
     await update($, runsAtom, runs => withRun(runs, run))
     void $.ui.open({ id: PANE, title: 'Agents' })
     $.ui.status(statusLine((await read($, runsAtom)) ?? [], startedAt))
-    pollSoon?.(8_000)
+    pollSoon?.(3_000)
 
     const ran = await next(e)
     // The result says whether the subagent already finished or runs on in
@@ -319,7 +326,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Text dimColor>
-          {active} running · {runs.length - active} finished · checked {lastPollAt ? `${duration(now - lastPollAt)} ago` : 'not yet'} · every 30s
+          {active} running · {runs.length - active} finished · checked {lastPollAt ? `${duration(now - lastPollAt)} ago` : 'not yet'} · every {POLL_MS / 1000}s
         </Text>
         {runs.map(run => {
           const style = TOOL_STYLE[run.tool]
@@ -385,7 +392,7 @@ export const register: Register = on => {
                   {p.error}
                 </Text>
               ) : null}
-              {!p?.found && run.probedAt !== null && isActive(run) ? (
+              {state === 'starting' && run.probedAt !== null ? (
                 <Text dimColor>{'  waiting for its session file to appear'}</Text>
               ) : null}
             </Box>

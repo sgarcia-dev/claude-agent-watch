@@ -32,6 +32,8 @@ Open SQLite stores read-only with `common.connect_ro(path)`.
   back whatever the last answer said, so a link holds once made.
 - `claimed` lists session IDs already linked to other runs of the same tool.
   Never link to one of those.
+- `endedBy` (optional) is when the launching command ended, in epoch ms. A
+  session that started more than 2 seconds after it belongs to another run.
 - For `claude`, `sessionId` is the subagent's agent ID when the mod knows it,
   and `command` holds the subagent type.
 
@@ -40,6 +42,7 @@ Open SQLite stores read-only with `common.connect_ro(path)`.
 When `sessionId` is null, pick the tool's session that:
 
 1. started at or after `startedAt - 5000` and before `startedAt + 120000`,
+   and no later than `endedBy + 2000` when `endedBy` is set,
 2. is not in `claimed`,
 3. started earliest among what is left, preferring sessions whose recorded
    folder matches `cwd` (compare real paths). When none match, ignore the

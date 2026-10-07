@@ -27,6 +27,10 @@ class AgentProbeTests(unittest.TestCase):
         self.assertIn("unknown tool", runs[0]["error"])
         self.assertEqual(set(common.FIELDS) | {"id"}, set(runs[0]))
 
+    def test_activity_line_drops_progress_markers(self):
+        self.assertEqual(common.one_line("PROGRESS 2/5\nReading codex.py"), "Reading codex.py")
+        self.assertEqual(common.one_line("PROGRESS 2/5"), "PROGRESS 2/5")
+
     def test_runs_started_together_get_different_sessions(self):
         with tempfile.TemporaryDirectory() as home:
             day = os.path.join(home, "sessions", "2026", "10", "07")

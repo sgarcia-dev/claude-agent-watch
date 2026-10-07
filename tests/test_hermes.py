@@ -116,16 +116,22 @@ class HermesTests(unittest.TestCase):
         self.session("wrong", started_at=995.0, cwd=str(other))
         self.session("right", started_at=1000.0, cwd=str(alias))
         self.assertEqual(self.probe()["sessionId"], "right")
-        self.assertFalse(self.probe(claimed=["right"])["found"])
+        # With the matching folder claimed, the time window decides.
+        self.assertEqual(self.probe(claimed=["right"])["sessionId"], "wrong")
 
-    def test_missing_session_cwd_is_eligible_and_earliest(self):
+    def test_matching_cwd_beats_an_earlier_session_without_one(self):
         self.session("no-cwd", started_at=995.0, cwd=None)
         self.session("with-cwd", started_at=1000.0)
-        self.assertEqual(self.probe()["sessionId"], "no-cwd")
+        self.assertEqual(self.probe()["sessionId"], "with-cwd")
 
-    def test_missing_run_cwd_does_not_match_recorded_cwd(self):
+    def test_missing_run_cwd_falls_back_to_time_window(self):
         self.session()
-        self.assertFalse(self.probe(cwd=None)["found"])
+        self.assertTrue(self.probe(cwd=None)["found"])
+
+    def test_session_after_the_run_ended_is_not_linked(self):
+        self.session(started_at=1060.0)
+        self.assertFalse(self.probe(endedBy=1_002_000)["found"])
+        self.assertTrue(self.probe(endedBy=1_059_000)["found"])
 
     def test_link_is_retained_outside_window(self):
         self.session(started_at=100.0)
