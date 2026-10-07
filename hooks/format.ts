@@ -140,3 +140,24 @@ export function labelFor(command: string, tool: ToolName): string {
   const line = tail.split('\n')[0] ?? ''
   return line.length > 48 ? line.slice(0, 47) + '…' : line
 }
+
+// A plain-text copy of the pane, written to a file each poll so a person (or
+// Claude) can check what the pane shows without a screenshot.
+export function paneText(runs: readonly Run[], now: number, lastPollAt: number): string {
+  const lines = [`${new Date(now).toISOString()} · ${runs.filter(isActive).length} running · ${runs.length} tracked · polled ${lastPollAt ? duration(now - lastPollAt) : 'never'} ago`]
+  lines.push(`status line: ${statusLine(runs, now) ?? '(cleared)'}`)
+  for (const run of runs) {
+    const m = modelOf(run)
+    const ctx = contextShare(run)
+    const pr = run.probe?.progress
+    const left = remaining(run, now)
+    lines.push('')
+    lines.push(`${TOOL_STYLE[run.tool].glyph} ${TOOL_STYLE[run.tool].name}  ${run.label}`)
+    lines.push(`  ${STATE_STYLE[stateOf(run)].word} ${duration(elapsed(run, now))} · ${m.model}${m.effort ? ' ' + m.effort : ''}${m.isObserved ? '' : ' (requested)'}`)
+    lines.push(`  ctx ${ctx === null ? 'unknown' : percent(ctx)}   progress ${pr ? `${pr.done}/${pr.total}` : run.probe?.steps != null ? `${run.probe.steps} steps` : 'none'}${left !== null ? ` ~${duration(left)} left` : ''}`)
+    if (run.probe?.lastActivity) lines.push(`  now: ${run.probe.lastActivity}`)
+    if (run.probe?.error) lines.push(`  reader: ${run.probe.error}`)
+    lines.push(`  [session ${run.probe?.sessionId ?? '-'} · exited ${run.exitedAt ? duration(now - run.exitedAt) + ' ago' : 'no'} · finished ${run.finishedAt ? duration(now - run.finishedAt) + ' ago' : 'no'} · bg task ${run.backgroundTaskId ?? '-'}]`)
+  }
+  return lines.join('\n') + '\n'
+}

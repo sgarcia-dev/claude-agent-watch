@@ -23,6 +23,7 @@ import {
   isActive,
   labelFor,
   modelOf,
+  paneText,
   percent,
   progressShare,
   remaining,
@@ -187,6 +188,7 @@ export const register: Register = on => {
 
         const after = (await read($, runsAtom)) ?? []
         $.ui.status(statusLine(after, now))
+        await $.fs.write(`${$.plugin.root}/.pane.txt`, paneText(after, now, now)).catch(() => undefined)
         if (after.length === 0 && before.length > 0) await $.ui.close({ id: PANE }).catch(() => undefined)
       } finally {
         isPolling = false

@@ -7,3 +7,5 @@ __pycache__/
 *.pyc
 .DS_Store
 !docs/readers/claude.md
+# Plain-text copy of the pane, rewritten each poll.
+.pane.txt
