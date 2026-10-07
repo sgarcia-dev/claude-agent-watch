@@ -2,7 +2,7 @@
 //
 // How it works: a tool.call hook spots Bash commands that start Codex,
 // OpenCode, Antigravity (agy) or Hermes, and Agent calls that start Claude
-// subagents. Each becomes a Run in $.state. Every 30 seconds the mod runs
+// subagents. Each becomes a Run in $.state. Every 5 seconds the mod runs
 // probe/agent_probe.py, which reads each tool's own session files and
 // reports model, context use, PROGRESS lines and last activity. A pane and a
 // status line entry show the runs; both go away once nothing is running.

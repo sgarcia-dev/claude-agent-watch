@@ -1,6 +1,6 @@
 # Probe contract
 
-The mod runs `python3 -I probe/agent_probe.py` every 30 seconds. It sends the
+The mod runs `python3 -I probe/agent_probe.py` every 5 seconds. It sends the
 runs it tracks as JSON on stdin and reads one JSON status per run on stdout.
 Each tool has one reader module: `probe/<tool>.py`.
 

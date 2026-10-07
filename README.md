@@ -68,7 +68,7 @@ only when the terminal is at least 144 columns wide. Otherwise type
 `/agent-watch` to open it.
 
 - `/agent-watch`: open the pane.
-- `/agent-watch poll`: check now instead of waiting up to 30 seconds.
+- `/agent-watch poll`: check now instead of waiting up to 5 seconds.
 - `/agent-watch clear`: drop finished agents from the list.
 
 It detects these launch shapes in Bash commands (after `cd`, `VAR=x`, `env`,
@@ -84,7 +84,7 @@ It detects these launch shapes in Bash commands (after `cd`, `VAR=x`, `env`,
 The mod has two halves:
 
 - `hooks/`: the Claude Code side, in TypeScript. `register.tsx` holds the
-  hooks, the 30-second poll, the pane and the status line. `detect.ts` spots
+  hooks, the 5-second poll, the pane and the status line. `detect.ts` spots
   launches. `format.ts` turns numbers into text.
 - `probe/`: one Python reader per tool. Each reads that tool's session store
   read-only and answers in the shape `probe/CONTRACT.md` defines.
@@ -127,7 +127,7 @@ line above.
   unknown.
 - Claude subagent context windows use a fixed rule (200k, or 1M for `[1m]`
   models). The transcripts do not state it.
-- The pane refreshes every 30 seconds, so running times move in 30-second steps.
+- The pane refreshes every 5 seconds. Each check is a local Python run over session files: no tokens, about 50 to 100 ms of CPU, and nothing at all when no agent is tracked.
 - Store formats change between tool versions. Readers were written against
   Codex 0.160.0, OpenCode 2.0.22, agy 1.3.0, Hermes 0.21.5 and Claude Code
   2.1.292.
