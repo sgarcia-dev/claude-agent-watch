@@ -42,10 +42,10 @@ const PANE = 'agent-watch'
 // Each check is a local Python run over session files: no tokens, ~50-100 ms.
 const POLL_MS = 5_000
 // A finished run stays on screen this long before it drops off.
-const LINGER_MS = 5 * 60_000
+const LINGER_MS = 60_000
 // A run that ended with no session or process ever found (a launch that
 // failed at once) has nothing to show; it goes sooner.
-const EMPTY_LINGER_MS = 30_000
+const EMPTY_LINGER_MS = 15_000
 // A run the probe never links and no tool call ends is dropped after this.
 const STALE_MS = 6 * 60 * 60_000
 

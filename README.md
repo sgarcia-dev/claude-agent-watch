@@ -14,8 +14,8 @@ When Claude starts one, a pane opens with one block per agent:
 ```
 
 A short version sits in the status line: `◆ codex 4m12s 3/7 ctx 38%`.
-A toast says when an agent finishes or fails. Finished agents stay five
-minutes, then drop off. With nothing running, the pane closes and the status
+A toast says when an agent finishes or fails. Finished agents stay one
+minute, then drop off (`/agent-watch clear` drops them now). With nothing running, the pane closes and the status
 line clears.
 
 ## What it shows
