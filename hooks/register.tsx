@@ -43,6 +43,9 @@ const PANE = 'agent-watch'
 const POLL_MS = 5_000
 // A finished run stays on screen this long before it drops off.
 const LINGER_MS = 5 * 60_000
+// A run that ended with no session or process ever found (a launch that
+// failed at once) has nothing to show; it goes sooner.
+const EMPTY_LINGER_MS = 30_000
 // A run the probe never links and no tool call ends is dropped after this.
 const STALE_MS = 6 * 60 * 60_000
 
@@ -116,7 +119,7 @@ function applyProbe(
       }
       return run
     })
-    .filter(r => r.finishedAt === null || now - r.finishedAt < LINGER_MS)
+    .filter(r => r.finishedAt === null || now - r.finishedAt < (r.probe?.found || r.pid !== null ? LINGER_MS : EMPTY_LINGER_MS))
     .filter(r => now - r.startedAt < STALE_MS)
   return { runs: next, finished }
 }
