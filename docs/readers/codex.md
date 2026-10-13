@@ -22,7 +22,9 @@ A missing store or missing match returns `found: false` without an error.
 Only `common.tail_lines` reads session activity, capped at 2000000 bytes.
 Malformed JSON lines, including an unfinished final line, are skipped.
 `turn_context.payload.model` and `effort` fill model and effort.
-Missing values stay null. Earlier values outside the tail are unavailable.
+Codex writes `turn_context` once per turn, so a long session's only one can
+sit before the tail. Then the reader looks for the first one in the file's
+first 2000000 bytes. Missing values stay null.
 
 `event_msg.payload.type` identifies lifecycle and usage events.
 `task_started` sets running and clears endedAt.
@@ -33,7 +35,13 @@ Aborts use the record timestamp. A running session has null endedAt.
 Without a terminal or waiting event, state is running.
 
 `token_count.payload.info.last_token_usage.input_tokens` fills contextUsed.
-`info.model_context_window` fills contextWindow.
+`info.model_context_window` fills contextWindow. It is 95% of the model's
+full window (the share in `models_cache.json`).
+`compactAt` is `model_auto_compact_token_limit` from the top level of
+`config.toml`, else the model's `auto_compact_token_limit` in
+`models_cache.json`, else 90% of the full window behind the session's own
+report. Real GPT-6 Sol sessions (272K) compacted near 235K. The catalog's
+windows change over time, so the session's report is the base.
 `info.total_token_usage.input_tokens` and `output_tokens` fill totals.
 Cached input and reasoning output are already included in these totals.
 They are not added again. Missing usage fields stay null.

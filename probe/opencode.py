@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import sqlite3
 import time
 
 try:
@@ -29,14 +31,54 @@ def _sum_pair(a, b):
     return a + b if a is not None and b is not None else None
 
 
-def _context_window(model):
+# OpenCode 2.0.24 caps OpenAI GPT models from 5.5 on when the user signs in
+# with a ChatGPT account instead of an API key (read from its binary). Seen in
+# real sessions: GPT-6 Sol compacts near 243K, not at the catalog's 1.05M.
+CHATGPT_LIMIT = {'context': 400_000, 'input': 272_000}
+
+
+def _catalog(conn):
+    """The models.dev catalog: OpenCode 2 keeps it in its database; older
+    versions in a cache file."""
+    try:
+        row = conn.execute("SELECT value FROM kv WHERE key='models-dev:catalog'").fetchone()
+        if row:
+            return json.loads(json.loads(row['value'])['body'])
+    except (sqlite3.Error, ValueError, KeyError, TypeError):
+        pass
     root = os.environ.get('AGENT_WATCH_OPENCODE_CACHE', os.path.expanduser('~/.cache/opencode'))
     try:
         with open(os.path.join(root, 'models.json'), encoding='utf-8') as fh:
-            catalog = json.load(fh)
-        return _number(catalog[model['providerID']]['models'][model['id']]['limit']['context'])
-    except (OSError, ValueError, KeyError, TypeError):
+            return json.load(fh)
+    except (OSError, ValueError):
         return None
+
+
+def _chatgpt_login(conn, provider):
+    # Only the credential's type is read, never its value's secrets.
+    try:
+        row = conn.execute(
+            "SELECT json_extract(value, '$.type') AS type FROM credential "
+            "WHERE integration_id=? AND active=1 ORDER BY time_updated DESC LIMIT 1", (provider,)).fetchone()
+        return row is not None and row['type'] == 'oauth'
+    except sqlite3.Error:
+        return False
+
+
+def _context_window(conn, model):
+    """The most input the model gets: the input limit when the catalog has
+    one, else the whole context limit."""
+    try:
+        limit = _catalog(conn)[model['providerID']]['models'][model['id']]['limit']
+    except (KeyError, TypeError):
+        limit = None
+    match = re.match(r'gpt-(\d+)(?:\.(\d+))?', model['id'])
+    if (model['providerID'] == 'openai' and match and
+            (int(match.group(1)), int(match.group(2) or 0)) >= (5, 5) and _chatgpt_login(conn, 'openai')):
+        limit = CHATGPT_LIMIT
+    if not isinstance(limit, dict):
+        return None
+    return _number(limit.get('input')) or _number(limit.get('context'))
 
 
 def _message(data, created):
@@ -106,7 +148,7 @@ def probe(run: dict, now_ms: int) -> dict:
         model = _object(session['model'])
         if model.get('providerID') and model.get('id'):
             out['model'] = model['providerID'] + '/' + model['id']
-            out['contextWindow'] = _context_window(model)
+            out['contextWindow'] = _context_window(conn, model)
         out['effort'] = model.get('variant')
         out['children'] = conn.execute('SELECT count(*) FROM session_v2 WHERE parent_id=?', (sid,)).fetchone()[0]
         count = conn.execute("SELECT count(*) FROM session_message WHERE session_id=? AND type='assistant'", (sid,)).fetchone()[0]
@@ -120,7 +162,8 @@ def probe(run: dict, now_ms: int) -> dict:
             data = _object(row['data'])
             tokens = data.get('tokens') or {}
             cached = tokens.get('cache') or {}
-            used = _sum_pair(tokens.get('input'), cached.get('read'))
+            # Tokens written to the cache were read as input too.
+            used = _sum_pair(_sum_pair(tokens.get('input'), cached.get('read')), cached.get('write', 0))
             output = _sum_pair(tokens.get('output'), tokens.get('reasoning'))
             # The newest message may still be streaming with no usage yet;
             # the latest one that has usage is the current context.

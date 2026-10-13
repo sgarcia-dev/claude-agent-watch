@@ -134,8 +134,25 @@ class ClaudeTests(unittest.TestCase):
     def test_million_token_rule(self):
         self.transcript(messages=[self.assistant(model="synthetic-model[1m]")])
         self.assertEqual(self.probe()["contextWindow"], 1000000)
-        self.transcript(messages=[self.assistant(), dict(type="system", contextWindow=1000000)])
-        self.assertEqual(self.probe()["contextWindow"], 1000000)
+        self.transcript(messages=[self.assistant(model="claude-opus-5-5")])
+        out = self.probe()
+        self.assertEqual(out["contextWindow"], 1000000)
+        self.assertEqual(out["compactAt"], 967000)
+        self.transcript(messages=[self.assistant(model="claude-haiku-4-5-20251001")])
+        out = self.probe()
+        self.assertEqual(out["contextWindow"], 200000)
+        self.assertEqual(out["compactAt"], 167000)
+
+    def test_compact_window_overrides(self):
+        self.transcript(messages=[self.assistant(model="claude-opus-5-5")])
+        (self.root / "store" / "settings.json").write_text('{"autoCompactWindow": 400000}')
+        self.assertEqual(self.probe()["compactAt"], 367000)
+        with patch.dict(os.environ, {"CLAUDE_CODE_AUTO_COMPACT_WINDOW": "500k"}):
+            self.assertEqual(self.probe()["compactAt"], 467000)
+        with patch.dict(os.environ, {"CLAUDE_AUTOCOMPACT_PCT_OVERRIDE": "50"}):
+            self.assertEqual(self.probe()["compactAt"], 190000)
+        with patch.dict(os.environ, {"DISABLE_AUTO_COMPACT": "1"}):
+            self.assertIsNone(self.probe()["compactAt"])
 
     def test_missing_usage_stays_null(self):
         message = self.assistant()

@@ -20,8 +20,10 @@ import type { BashCall, SeenProcess } from './runs'
 import {
   STATE_STYLE,
   TOOL_STYLE,
+  ageLabel,
   bar,
   contextColor,
+  contextDetail,
   contextShare,
   duration,
   elapsed,
@@ -35,7 +37,6 @@ import {
   stateOf,
   statusLine,
   steps,
-  tokens,
 } from './format'
 
 const PANE = 'agent-watch'
@@ -427,10 +428,7 @@ export const register: Register = on => {
                 ) : (
                   <Text>
                     <Text color={contextColor(ctx)}>{bar(ctx, barWidth)}</Text> {percent(ctx)}
-                    <Text dimColor>
-                      {' '}
-                      {tokens(p!.contextUsed!)}/{tokens(p!.contextWindow!)}
-                    </Text>
+                    <Text dimColor> · {contextDetail(run)}</Text>
                   </Text>
                 )}
                 {'   progress '}
@@ -446,14 +444,13 @@ export const register: Register = on => {
               </Text>
               {p?.lastActivity ? (
                 <Text wrap="truncate-end">
-                  <Text dimColor>{isDone ? '  last: ' : '  now: '}</Text>
+                  <Text dimColor>{'  ' + ageLabel(isDone ? 'last' : 'now', p.lastActivityAt, now)}</Text>
                   {p.lastActivity}
-                  <Text dimColor>{p.lastActivityAt ? ` · ${duration(now - p.lastActivityAt)} ago` : ''}</Text>
                 </Text>
               ) : null}
               {p?.lastMessage ? (
                 <Text wrap="truncate-end">
-                  <Text dimColor>{isDone ? '  result: ' : '  said: '}</Text>
+                  <Text dimColor>{'  ' + ageLabel(isDone ? 'result' : 'said', p.lastMessageAt, now)}</Text>
                   <Text italic>{p.lastMessage}</Text>
                 </Text>
               ) : null}

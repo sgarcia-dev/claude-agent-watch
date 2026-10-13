@@ -36,10 +36,18 @@ Input usage adds `input_tokens`, `cache_read_input_tokens`, and
 `cache_creation_input_tokens`. Output usage uses `output_tokens`.
 Missing usage components leave the affected total null.
 `contextUsed` is the latest assistant response's combined input usage.
-The context window is a fixed task rule: 200000 by default, or 1000000
-when the model contains `[1m]`. This default is not read from local data.
-An explicit top-level `contextWindow: 1000000` also selects that window.
-The default rule differs from the contract's requirement for local data.
+Transcripts do not state the window. The reader copies Claude Code
+2.1.296's model table: 1000000 for Opus 4.7 and later, Sonnet 5 and later,
+Haiku 5.5, Fable and Mythos; 200000 for older models, unless the name ends
+in `[1m]`. `CLAUDE_CODE_DISABLE_1M_CONTEXT` forces 200000.
+`compactAt` follows Claude Code's rule: the auto-compact window (the model's
+window, unless `CLAUDE_CODE_AUTO_COMPACT_WINDOW` or `autoCompactWindow` in
+`settings.json` sets a smaller one, at least 100000) less 20000 for the
+reply and a 13000 buffer. Opus 5.5 compacts at 967000; a 200K model at
+167000. `CLAUDE_AUTOCOMPACT_PCT_OVERRIDE` lowers it further.
+`DISABLE_AUTO_COMPACT` or `DISABLE_COMPACT` leaves it null. Claude Code can
+also tune the window from its servers, which no local file shows. Real
+sessions on 2.1.294 auto-compacted at 210K and 312K, below this rule.
 
 The last assistant's `end_turn` means `done`, unless a later user record
 shows that work resumed. Other assistant stops mean `running`.

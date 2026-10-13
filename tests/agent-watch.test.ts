@@ -100,7 +100,7 @@ describe('format', () => {
   test('time left scales elapsed time by the steps still to do', () => {
     const probe = {
       found: true, sessionId: 's', state: 'running' as const, model: null, effort: null,
-      contextUsed: null, contextWindow: null, inputTokens: null, outputTokens: null,
+      contextUsed: null, contextWindow: null, compactAt: null, inputTokens: null, outputTokens: null,
       progress: { done: 1, total: 4 }, steps: null, lastActivity: null, lastActivityAt: null,
       lastMessage: null, lastMessageAt: null, endedAt: null, children: null, error: null,
     }
@@ -203,7 +203,7 @@ describe('the mod', () => {
           processes: [],
           runs: request.runs.map(r => ({
             id: r.id, found: true, sessionId: 'thread-1', state: 'running', model: 'gpt-6.1-sol', effort: 'medium',
-            contextUsed: 64_000, contextWindow: 256_000, inputTokens: 100_000, outputTokens: 2_000,
+            contextUsed: 64_000, contextWindow: 256_000, compactAt: 128_000, inputTokens: 100_000, outputTokens: 2_000,
             progress: { done: 2, total: 5 }, steps: 9, lastActivity: 'exec: npm test', lastActivityAt: 1_000_000,
             lastMessage: 'Running the tests before I edit the reader.', lastMessageAt: 1_000_000, endedAt: null, children: 0, error: null,
           })),
@@ -231,12 +231,13 @@ describe('the mod', () => {
 
     for (const surface of ['terminal', 'desktop'] as const) {
       const ui = await $.ui.mount({ ...PANE, surface, props: PANE_PROPS })
-      expect(await ui.find({ text: /25%/ })).toBeDefined()
+      expect(await ui.find({ text: /50%/ })).toBeDefined()
+      expect(await ui.find({ text: /64k used · compacts at 128k of 256k/ })).toBeDefined()
       expect(await ui.find({ text: /2\/5/ })).toBeDefined()
-      expect(await ui.find({ text: /exec: npm test/ })).toBeDefined()
-      expect(await ui.find({ text: /Running the tests before I edit the reader/ })).toBeDefined()
+      expect(await ui.find({ text: /now \d+s ago: exec: npm test/ })).toBeDefined()
+      expect(await ui.find({ text: /said \d+s ago: Running the tests before I edit the reader/ })).toBeDefined()
       await ui.unmount()
     }
-    expect(statuses.at(-1)).toBe('◆ codex 5s 2/5 ctx 25%')
+    expect(statuses.at(-1)).toBe('◆ codex 5s 2/5 ctx 50%')
   })
 })

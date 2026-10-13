@@ -36,6 +36,13 @@ It matches `sessions.model` and `sessions.billing_base_url` exactly.
 Quoted keys and trailing numeric comments are supported. General YAML is not.
 Missing keys, model names, or billing URLs leave the window null.
 
+`compactAt` follows Hermes's `agent/context_compressor.py`: the window times
+`compression.threshold` from `config.yaml` (beside the database, then the
+root; default 0.5), raised to at least 0.75 for windows under 512000, never
+below 64000 unless that passes 85% of the window, then capped by
+`compression.threshold_tokens` when set. `compression.enabled: false` leaves
+it null. Per-model thresholds and an output reservation are not read.
+
 `inputTokens` and `outputTokens` use the session totals `input_tokens` and
 `output_tokens`. Cache and reasoning breakdowns are not added again.
 `steps` uses `api_call_count`, not `tool_call_count` or `message_count`.

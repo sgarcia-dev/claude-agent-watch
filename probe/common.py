@@ -14,7 +14,7 @@ LINK_END_SLACK_MS = 2_000
 
 FIELDS = (
     "found", "sessionId", "state", "model", "effort", "contextUsed",
-    "contextWindow", "inputTokens", "outputTokens", "progress", "steps",
+    "contextWindow", "compactAt", "inputTokens", "outputTokens", "progress", "steps",
     "lastActivity", "lastActivityAt", "lastMessage", "lastMessageAt",
     "endedAt", "children", "error",
 )

@@ -8,12 +8,16 @@ When Claude starts one, a pane opens with one block per agent:
 ```
 ◆ Codex  Codex worker for the reader
   running 4m12s · gpt-6.1-sol medium
-  ctx ████░░░░░░ 38% 98k/258k   progress ███░░░░░░░ 3/7 ~5m35s left
-  now: exec_command: python3 -m unittest discover -s tests -t . · 20s ago
-  said: The reader tests pass; next I check the Hermes store.
+  ctx ████░░░░░░ 41% · 186k used · compacts at 450k of 475k   progress ███░░░░░░░ 3/7 ~5m35s left
+  now 20s ago: exec_command: python3 -m unittest discover -s tests -t .
+  said 45s ago: The reader tests pass; next I check the Hermes store.
 ```
 
-A short version sits in the status line: `◆ codex 4m12s 3/7 ctx 38%`.
+The context bar fills toward the point where the agent's own tool compacts
+(summarizes) its session, since that is when it starts losing detail. When
+that point is unknown, it fills toward the model's whole window.
+
+A short version sits in the status line: `◆ codex 4m12s 3/7 ctx 41%`.
 A toast says when an agent finishes or fails. Finished agents stay one
 minute, then drop off (`/agent-watch clear` drops them now). With nothing running, the pane closes and the status
 line clears.
@@ -24,7 +28,8 @@ line clears.
 |---|---|---|---|---|---|
 | Running time | yes | yes | yes | yes | yes |
 | Model and effort really used | yes | yes | yes | yes | yes |
-| Context used / window | yes | yes | no | yes | yes (window is a fixed rule) |
+| Context used / window | yes | yes | no | yes | yes |
+| Where it compacts | yes | no | no | yes | yes |
 | Progress and time left | with PROGRESS lines | with PROGRESS lines | with PROGRESS lines | with PROGRESS lines | with PROGRESS lines |
 | What it is doing now (last tool call) | yes | yes | step type only | yes | yes |
 | What it said last (its own words) | yes | yes | yes | yes | yes |
@@ -141,8 +146,14 @@ line above.
 - Antigravity stores sessions in an undocumented binary format. Its reader
   gets the model, step count, state and output tokens. Context use stays
   unknown.
-- Claude subagent context windows use a fixed rule (200k, or 1M for `[1m]`
-  models). The transcripts do not state it.
+- Context windows and compaction points come from each tool's own rules,
+  read from its code and checked against real sessions in October 2026
+  (Claude Code 2.1.296, Codex, OpenCode 2.0.24, Hermes). Claude transcripts
+  do not state the window, so the Claude reader copies Claude Code's model
+  table: 1M for current models, 200K for older ones. Claude Code can also
+  move its compaction point from its servers, which no local file shows.
+  OpenCode's compaction point is not known, so its bar fills to the window.
+  A tool update can change any of these.
 - The pane refreshes every 5 seconds. Each check is a local Python run over
   session files and the process list: no tokens, about 50 to 100 ms of CPU.
   It runs only while an agent is tracked, a Bash command is running or ended

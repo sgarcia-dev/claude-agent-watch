@@ -68,6 +68,66 @@ def _context_window(root: Path, store: Path, model, base_url):
     return None
 
 
+# Hermes's trigger rule (agent/context_compressor.py): windows under 512K
+# trigger at 75% or more, never below 64K unless that passes 85% of the window.
+SMALL_WINDOW = 512_000
+SMALL_WINDOW_SHARE = 0.75
+MINIMUM_TRIGGER = 64_000
+FLOOR_CAP_SHARE = 0.85
+
+
+def _trigger(window: int, share: float) -> int:
+    if window < SMALL_WINDOW:
+        share = max(share, SMALL_WINDOW_SHARE)
+    value = int(window * share)
+    floored = max(value, MINIMUM_TRIGGER)
+    cap = int(window * FLOOR_CAP_SHARE)
+    if floored > value and floored > cap:
+        floored = max(value, cap)
+    if floored >= window:
+        return max(1, min(cap, window - 1))
+    return floored
+
+
+def _compression(root: Path, store: Path, window):
+    """Where Hermes compresses, from compression.threshold (a share of the
+    window) and the optional compression.threshold_tokens cap in its
+    config.yaml. Per-model overrides and a model's output reservation are
+    not read."""
+    if not window:
+        return None
+    for path in dict.fromkeys((store.parent / "config.yaml", root / "config.yaml")):
+        if not path.is_file():
+            continue
+        values = {}
+        in_block = False
+        with path.open(encoding="utf-8") as handle:
+            lines = handle.read(256_000).splitlines()
+        for line in lines:
+            if not line.strip() or line.lstrip().startswith("#"):
+                continue
+            if not line[0].isspace():
+                in_block = line.strip() == "compression:"
+                continue
+            # Only the block's own keys, two spaces in.
+            if in_block and line.startswith("  ") and not line.startswith("   "):
+                key, _, value = line.strip().partition(":")
+                values[key] = value.split("#", 1)[0].strip().strip("\"'")
+        if not values:
+            continue
+        if values.get("enabled", "true").lower() == "false":
+            return None
+        try:
+            share = float(values.get("threshold") or 0.5)
+        except ValueError:
+            share = 0.5
+        at = _trigger(window, share)
+        if values.get("threshold_tokens", "").isdigit() and int(values["threshold_tokens"]) > 0:
+            at = min(at, int(values["threshold_tokens"]), window)
+        return at
+    return _trigger(window, 0.5)
+
+
 def _fill(out: dict, row: sqlite3.Row, conn, root: Path, store: Path):
     out.update(found=True, sessionId=row["id"], model=row["model"],
                inputTokens=_integer(row["input_tokens"]),
@@ -98,6 +158,7 @@ def _fill(out: dict, row: sqlite3.Row, conn, root: Path, store: Path):
     if isinstance(reasoning, dict) and isinstance(reasoning.get("effort"), str):
         out["effort"] = reasoning["effort"] or None
     out["contextWindow"] = _context_window(root, store, row["model"], row["billing_base_url"])
+    out["compactAt"] = _compression(root, store, out["contextWindow"])
     out["children"] = conn.execute(
         "SELECT count(*) FROM sessions WHERE parent_session_id = ?", (row["id"],)
     ).fetchone()[0]

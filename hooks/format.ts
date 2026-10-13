@@ -24,7 +24,7 @@ export function duration(ms: number): string {
 }
 
 export function tokens(n: number): string {
-  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1)}M`
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n >= 10_000_000 ? 0 : 1).replace(/\.0$/, '')}M`
   if (n >= 1000) return `${Math.round(n / 1000)}k`
   return String(n)
 }
@@ -68,10 +68,31 @@ export function modelOf(run: Run): { model: string; effort: string | null; isObs
   return { model: 'default', effort: run.flagEffort, isObserved: false }
 }
 
+// How full the context is, against the point where the tool compacts it when
+// known (that is when the agent starts losing detail), else the whole window.
+export function contextLimit(run: Run): number | null {
+  const p = run.probe
+  return p?.compactAt || p?.contextWindow || null
+}
+
 export function contextShare(run: Run): number | null {
   const p = run.probe
-  if (!p || p.contextUsed === null || !p.contextWindow) return null
-  return Math.min(1, p.contextUsed / p.contextWindow)
+  const limit = contextLimit(run)
+  if (!p || p.contextUsed === null || !limit) return null
+  return Math.min(1, p.contextUsed / limit)
+}
+
+// "600k used · compacts at 967k of 1M", or "600k of 1M" with no compaction point.
+export function contextDetail(run: Run): string {
+  const p = run.probe!
+  const used = tokens(p.contextUsed!)
+  if (!p.compactAt) return `${used} of ${tokens(p.contextWindow!)}`
+  return `${used} used · compacts at ${tokens(p.compactAt)}${p.contextWindow ? ` of ${tokens(p.contextWindow)}` : ''}`
+}
+
+// "now 12s ago: ..." with the age first, so a long line cannot push it off screen.
+export function ageLabel(label: string, at: number | null | undefined, now: number): string {
+  return at ? `${label} ${duration(Math.max(0, now - at))} ago: ` : `${label}: `
 }
 
 export function progressShare(run: Run): number | null {
@@ -176,9 +197,9 @@ export function paneText(runs: readonly Run[], now: number, lastPollAt: number):
     lines.push('')
     lines.push(`${TOOL_STYLE[run.tool].glyph} ${TOOL_STYLE[run.tool].name}  ${run.label}`)
     lines.push(`  ${STATE_STYLE[stateOf(run)].word} ${duration(elapsed(run, now))} · ${m.model}${m.effort ? ' ' + m.effort : ''}${m.isObserved ? '' : ' (requested)'}`)
-    lines.push(`  ctx ${ctx === null ? 'unknown' : percent(ctx)}   progress ${pr ? `${pr.done}/${pr.total}` : run.probe?.steps != null ? steps(run.probe.steps) : 'none'}${left !== null ? ` ~${duration(left)} left` : ''}`)
-    if (run.probe?.lastActivity) lines.push(`  ${isActive(run) ? 'now' : 'last'}: ${run.probe.lastActivity}`)
-    if (run.probe?.lastMessage) lines.push(`  ${isActive(run) ? 'said' : 'result'}: ${run.probe.lastMessage}`)
+    lines.push(`  ctx ${ctx === null ? 'unknown' : `${percent(ctx)} · ${contextDetail(run)}`}   progress ${pr ? `${pr.done}/${pr.total}` : run.probe?.steps != null ? steps(run.probe.steps) : 'none'}${left !== null ? ` ~${duration(left)} left` : ''}`)
+    if (run.probe?.lastActivity) lines.push(`  ${ageLabel(isActive(run) ? 'now' : 'last', run.probe.lastActivityAt, now)}${run.probe.lastActivity}`)
+    if (run.probe?.lastMessage) lines.push(`  ${ageLabel(isActive(run) ? 'said' : 'result', run.probe.lastMessageAt, now)}${run.probe.lastMessage}`)
     if (run.probe?.error) lines.push(`  reader: ${run.probe.error}`)
     lines.push(`  [session ${run.probe?.sessionId ?? '-'} · exited ${run.exitedAt ? duration(now - run.exitedAt) + ' ago' : 'no'} · finished ${run.finishedAt ? duration(now - run.finishedAt) + ' ago' : 'no'} · bg task ${run.backgroundTaskId ?? '-'} · pid ${run.pid ?? '-'}]`)
   }

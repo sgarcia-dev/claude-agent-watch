@@ -155,6 +155,25 @@ class OpenCodeTests(unittest.TestCase):
             self.assertEqual(out['state'], 'waiting')
             self.assertIsNone(out['endedAt'])
 
+    def test_database_catalog_and_chatgpt_limit(self):
+        self.session()
+        self.db.executescript('''
+            CREATE TABLE kv (key TEXT PRIMARY KEY, value TEXT);
+            CREATE TABLE credential (integration_id TEXT, value TEXT, active INTEGER, time_updated INTEGER);
+        ''')
+        body = {'fixture': {'models': {'test-model': {'limit': {'context': 90000, 'input': 80000}}}},
+                'openai': {'models': {'gpt-6-sol': {'limit': {'context': 1050000, 'input': 922000}}}}}
+        self.db.execute("INSERT INTO kv VALUES ('models-dev:catalog', ?)", (json.dumps({'body': json.dumps(body)}),))
+        self.db.commit()
+        self.assertEqual(self.probe()['contextWindow'], 80000)
+        self.db.execute("UPDATE session_v2 SET model=?", (json.dumps(dict(id='gpt-6-sol', providerID='openai')),))
+        self.db.execute("INSERT INTO credential VALUES ('openai', ?, 1, 1)", (json.dumps({'type': 'api'}),))
+        self.db.commit()
+        self.assertEqual(self.probe()['contextWindow'], 922000)
+        self.db.execute("UPDATE credential SET value=?", (json.dumps({'type': 'oauth', 'access': 'synthetic'}),))
+        self.db.commit()
+        self.assertEqual(self.probe()['contextWindow'], 272000)
+
     def test_unknown_usage_and_catalog(self):
         self.session()
         self.message(1, [{'type': 'reasoning', 'text': 'PROGRESS 1/1'},

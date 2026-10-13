@@ -202,6 +202,23 @@ class HermesTests(unittest.TestCase):
         cache.write_text("context_lengths:\n  other-model@https://example.invalid/v1: 65536\n")
         self.assertIsNone(self.probe()["contextWindow"])
 
+    def test_compression_point(self):
+        self.session()
+        (self.root / "context_length_cache.yaml").write_text(
+            "context_lengths:\n  synthetic-model@https://example.invalid/v1: 1000000\n")
+        self.assertEqual(self.probe()["compactAt"], 500000)
+        config = self.root / "config.yaml"
+        config.write_text("compression:\n  enabled: true\n  threshold: 0.6\n  threshold_tokens:\n"
+                          "  nested:\n    threshold: 0.9\nother:\n  threshold: 0.1\n")
+        self.assertEqual(self.probe()["compactAt"], 600000)
+        config.write_text("compression:\n  threshold: 0.6\n  threshold_tokens: 300000\n")
+        self.assertEqual(self.probe()["compactAt"], 300000)
+        # Windows under 512K trigger at 75% or more.
+        self.assertEqual(hermes._trigger(272000, 0.5), 204000)
+        self.assertEqual(hermes._trigger(64000, 0.5), 54400)
+        config.write_text("compression:\n  enabled: false\n  threshold: 0.5\n")
+        self.assertIsNone(self.probe()["compactAt"])
+
     def test_profile_linking_competes_with_root(self):
         profile = self.create_store(self.root / "profiles" / "synthetic-profile")
         self.session("root-session", started_at=1001)

@@ -120,6 +120,28 @@ class CodexTests(unittest.TestCase):
         for key, value in expected.items():
             self.assertEqual(out[key], value, key)
 
+    def test_compact_point(self):
+        self.rollout(records=[{"type": "turn_context", "payload": {"model": "synthetic-model"}},
+                              event("token_count", 4000, info={"model_context_window": 950})])
+        self.assertEqual(self.probe()["compactAt"], 900)
+        catalog = self.root / "models_cache.json"
+        catalog.write_text(json.dumps({"models": [
+            {"slug": "synthetic-model", "effective_context_window_percent": 50}]}))
+        self.assertEqual(self.probe()["compactAt"], 1710)
+        catalog.write_text(json.dumps({"models": [
+            {"slug": "synthetic-model", "auto_compact_token_limit": 700}]}))
+        self.assertEqual(self.probe()["compactAt"], 700)
+        (self.root / "config.toml").write_text(
+            'model = "synthetic-model"\nmodel_auto_compact_token_limit = 600\n[profiles.x]\n')
+        self.assertEqual(self.probe()["compactAt"], 600)
+
+    def test_model_from_first_turn_when_tail_lacks_it(self):
+        filler = [item("reasoning", 2000 + i, summary=[], content="x" * 1000) for i in range(30)]
+        self.rollout(records=[{"type": "turn_context", "payload": {"model": "synthetic-model", "effort": "low"}}, *filler])
+        with patch.object(codex, "TAIL_BYTES", 5000):
+            out = self.probe()
+        self.assertEqual((out["model"], out["effort"]), ("synthetic-model", "low"))
+
     def test_done_aborted_and_restart(self):
         for terminal, state in (("task_complete", "done"), ("turn_aborted", "failed")):
             with self.subTest(terminal=terminal):

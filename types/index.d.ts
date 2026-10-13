@@ -12,6 +12,8 @@ export type Probed = {
   effort: string | null
   contextUsed: number | null
   contextWindow: number | null
+  // Context size at which the tool compacts the session on its own.
+  compactAt: number | null
   inputTokens: number | null
   outputTokens: number | null
   progress: { done: number; total: number } | null

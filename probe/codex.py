@@ -15,6 +15,43 @@ except ImportError:
 
 TAIL_BYTES = 2_000_000
 HEAD_BYTES = 262_144
+# With no limit of its own, Codex compacts at 90% of the model's full window.
+# Rollouts report 95% of that window as model_context_window. Seen in real
+# rollouts: GPT-6 Sol (272K) compacts near 235K.
+AUTO_COMPACT_SHARE = 0.9
+REPORTED_SHARE = 0.95
+
+
+def _compact_at(root, model, reported):
+    """Codex's auto-compact point: the config's override, else the model
+    catalog's limit, else 90% of the full window behind the session's own
+    reported one. The catalog's window changes over time; the session's
+    report is what that session got."""
+    try:
+        for line in (root / "config.toml").read_text(encoding="utf-8").splitlines():
+            if line.startswith("["):
+                break  # Only the top-level key applies.
+            match = re.match(r"\s*model_auto_compact_token_limit\s*=\s*(\d+)", line)
+            if match:
+                return int(match.group(1))
+    except OSError:
+        pass
+    share = REPORTED_SHARE
+    try:
+        catalog = json.loads((root / "models_cache.json").read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        catalog = None
+    models = catalog.get("models") if isinstance(catalog, dict) else catalog
+    for entry in models if isinstance(models, list) else []:
+        if isinstance(entry, dict) and entry.get("slug") == model:
+            limit = _integer(entry.get("auto_compact_token_limit"))
+            if limit:
+                return limit
+            percent = _integer(entry.get("effective_context_window_percent"))
+            share = percent / 100 if percent else share
+    if not reported:
+        return None
+    return int(round(reported / share) * AUTO_COMPACT_SHARE)
 
 
 def _ms(value):
@@ -61,6 +98,19 @@ def _meta(path):
             payload = rec.get("payload")
             return payload if isinstance(payload, dict) else None
     return None
+
+
+def _first_turn(path):
+    """Codex writes turn_context once per turn; a long session's only one can
+    sit before the tail the reader keeps, so look for it at the start."""
+    with path.open("rb") as fh:
+        head = fh.read(TAIL_BYTES)
+    for line in head.splitlines():
+        if b'"turn_context"' in line:
+            rec = _record(line)
+            if rec.get("type") == "turn_context" and isinstance(rec.get("payload"), dict):
+                return rec["payload"]
+    return {}
 
 
 def _parent(meta):
@@ -236,6 +286,11 @@ def probe(run: dict, now_ms: int) -> dict:
             return out
         out.update(found=True, sessionId=chosen["id"])
         _read(chosen["path"], chosen["meta"], out)
+        if out["model"] is None:
+            turn = _first_turn(chosen["path"])
+            out["model"] = turn.get("model") if isinstance(turn.get("model"), str) else None
+            out["effort"] = out["effort"] or (turn.get("effort") if isinstance(turn.get("effort"), str) else None)
+        out["compactAt"] = _compact_at(root, out["model"], out["contextWindow"])
         parents = [_parent(c["meta"]) for c in candidates if c["id"] != chosen["id"]]
         # Absence of a parent field does not establish native subagent support.
         if ("parent_thread_id" in chosen["meta"] or _parent(chosen["meta"]) is not None

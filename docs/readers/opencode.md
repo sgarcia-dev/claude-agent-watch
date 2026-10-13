@@ -14,9 +14,18 @@ Claimed IDs are excluded. Recorded directories must match real paths.
 
 The session's `model` is JSON with `providerID`, `id`, and `variant`.
 `model` reports `providerID/id`. `effort` reports `variant`.
-The catalog is `~/.cache/opencode/models.json`.
-`AGENT_WATCH_OPENCODE_CACHE` overrides its directory.
-`contextWindow` uses provider -> `models` -> model ID -> `limit.context`.
+OpenCode 2 keeps the models.dev catalog in `opencode.db`, table `kv`, key
+`models-dev:catalog` (JSON with the catalog as a string in `body`). The
+reader uses it first, then `~/.cache/opencode/models.json` (older versions;
+`AGENT_WATCH_OPENCODE_CACHE` overrides its directory), which lacks newer
+models.
+`contextWindow` is the model's `limit.input` when set, else `limit.context`.
+OpenCode 2.0.24 caps OpenAI GPT 5.5 and later at 272000 input (400000
+context) when the OpenAI login is a ChatGPT account. The reader checks that
+by reading only the `type` field of the active `openai` row in the
+`credential` table (`oauth`). Real GPT-6 Sol sessions compacted near 243000.
+OpenCode's compaction rule could not be read from its compiled binary, so
+`compactAt` stays null.
 A missing model, catalog, or context limit leaves that field null.
 
 `session_pending` is checked by `session_id` and `type`.
@@ -33,7 +42,7 @@ Only `assistant` rows supply progress, usage, or activity.
 `steps` counts those rows as model requests, including retries.
 The reader loads at most 512 assistant rows in descending `seq` order.
 `data.tokens` contains `input`, `output`, `reasoning`, and `cache.read`.
-`contextUsed` is the latest assistant's `input` plus `cache.read`.
+`contextUsed` is the latest assistant's `input` plus `cache.read` plus `cache.write`.
 It stays null when that message has no complete usage.
 
 For idle sessions, input totals use `tokens_input` plus `tokens_cache_read`.

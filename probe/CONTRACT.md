@@ -68,7 +68,8 @@ for anything unknown. Never guess a value.
 | `model` | string or null | Model the session actually used, as the tool names it |
 | `effort` | string or null | Reasoning effort or variant actually used |
 | `contextUsed` | int or null | Input tokens of the latest model request (context occupancy) |
-| `contextWindow` | int or null | That model's context window, from local data only |
+| `contextWindow` | int or null | The most context the tool lets that model use, from local data only |
+| `compactAt` | int or null | Context size at which the tool compacts (summarizes) the session on its own, when known |
 | `inputTokens` | int or null | Total input tokens so far (cached included) |
 | `outputTokens` | int or null | Total output tokens so far (reasoning included) |
 | `progress` | `{"done": n, "total": m}` or null | Latest `PROGRESS n/m` line the agent wrote |
