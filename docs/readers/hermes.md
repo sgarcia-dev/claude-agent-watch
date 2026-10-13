@@ -78,7 +78,7 @@ Read failures put a short exception type in `error`; they do not expose content.
 
 ## Quirks found live (2026-10-07)
 
-- `task-hermes` launches with `--source tool`; that source counts as a CLI run.
+- Launchers that run `hermes chat --source tool` write source `tool`; it counts as a CLI run.
 - With Codex-backed models the assistant text, including PROGRESS lines,
   is in `messages.codex_message_items`, not `content`. Both are read.
 - `last_activity_description` is often generic ("receiving stream

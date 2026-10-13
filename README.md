@@ -62,7 +62,7 @@ claude plugin install agent-watch@agent-watch
 From GitHub, typed at a Claude Code prompt:
 
 ```
-/plugin install agent-watch --marketplace <owner>/claude-agent-watch
+/plugin install agent-watch --marketplace sgarcia-dev/claude-agent-watch
 ```
 
 Answer `y` to add the marketplace, then pick the user scope. In a session that
@@ -127,9 +127,10 @@ echo '{"now": 0, "runs": [{"id": "x", "tool": "codex", "startedAt": 179139700000
 
 ## Share it
 
-Push this folder to a GitHub repository. The marketplace file is already in
-`.claude-plugin/marketplace.json`. Others install it with the `/plugin install`
-line above.
+It lives at https://github.com/sgarcia-dev/claude-agent-watch. The
+marketplace file is `.claude-plugin/marketplace.json`, so others install it
+with the `/plugin install` line above. A fork works the same way under its
+own owner name.
 
 ## Limits
 
@@ -161,3 +162,7 @@ line above.
 - Store formats change between tool versions. Readers were written against
   Codex 0.160.0, OpenCode 2.0.22, agy 1.3.0, Hermes 0.21.5 and Claude Code
   2.1.292.
+
+## License
+
+MIT. See [LICENSE](LICENSE).

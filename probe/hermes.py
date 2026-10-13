@@ -15,7 +15,7 @@ except ImportError:  # agent_probe.py imports readers as top-level modules.
     import common
 
 
-# "tool" is what `hermes chat --source tool` writes (the task-hermes recipe).
+# "tool" is what `hermes chat --source tool` writes, as launcher scripts use.
 CLI_SOURCES = ("cli", "oneshot", "tui", "api_server", "tool")
 NORMAL_ENDS = {"agent_close", "cli_close", "session_reset", "session_switch"}
 FAILED_ENDS = {"startup_orphan_reap"}
